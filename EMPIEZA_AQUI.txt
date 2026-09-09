@@ -1,0 +1,32 @@
+========================================================
+  INVENTARIO ANDROID - COMO OBTENER EL APK
+========================================================
+
+PASO 0 (una sola vez): borra el repo "inventario-android"
+que creaste antes en github.com si existe. Entra al repo,
+Settings, Danger Zone al fondo, "Delete this repository".
+
+PASO 1: haz doble clic en el archivo:
+
+    SUBIR_A_GITHUB.bat
+
+Se abre una ventana negra. Sigue las instrucciones que
+te va mostrando. Vas a:
+  - Escribir tu usuario de GitHub (una vez)
+  - Autorizar el acceso a tu cuenta (una vez, por navegador)
+  - Esperar 30 segundos mientras sube
+
+Cuando termine, el script abre solo el navegador en la
+pestana Actions de tu repo. Ahi ves un circulo amarillo
+que gira: es GitHub compilando el APK. Tarda 4-6 min.
+
+PASO 2: cuando el circulo pase a verde, ve a la pestana
+"Code" del repo, columna derecha, click en "Releases",
+y descarga el archivo app-release.apk. Ese es tu APK.
+
+PASO 3: pasalo al celular por correo, WhatsApp o USB,
+abrelo, permite "instalar de esta fuente", y listo.
+
+========================================================
+Si algo se ve raro, screenshot y me lo mandas.
+========================================================
