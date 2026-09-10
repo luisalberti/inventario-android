@@ -17,7 +17,7 @@ class Repo(private val prefs: Prefs) {
         val normalizado = if (baseUrl.endsWith("/")) baseUrl else "$baseUrl/"
         cachedApi?.let { if (it.first == normalizado) return it.second }
         val client = OkHttpClient.Builder()
-            .connectTimeout(15, TimeUnit.SECONDS)
+            .connectTimeout(20, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
             .addInterceptor(HttpLoggingInterceptor().setLevel(HttpLoggingInterceptor.Level.BASIC))
             .build()
@@ -32,7 +32,6 @@ class Repo(private val prefs: Prefs) {
         return nueva
     }
 
-    /** Interpreta HttpException devolviendo el `detail` de FastAPI si viene. */
     private fun httpMsg(e: HttpException): String {
         val body = try { e.response()?.errorBody()?.string().orEmpty() } catch (_: Exception) { "" }
         val moshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
@@ -41,9 +40,9 @@ class Repo(private val prefs: Prefs) {
         return detail ?: "HTTP ${e.code()}: ${e.message()}"
     }
 
-    suspend fun login(url: String, user: String, password: String) {
+    suspend fun login(url: String, user: String, password: String, tenantId: Int = 1) {
         try {
-            val t = api(url).login(user, password)
+            val t = api(url).login(LoginReq(user, password, tenantId))
             prefs.guardarLogin(url, t.accessToken, user)
         } catch (e: HttpException) {
             throw RuntimeException(httpMsg(e))
@@ -52,7 +51,7 @@ class Repo(private val prefs: Prefs) {
 
     suspend fun leerEspecimen(url: String, token: String, uid: String): Especimen {
         try {
-            return api(url).leerEspecimen("Bearer $token", uid)
+            return api(url).leerEspecimen("Bearer $token", uid = uid)
         } catch (e: HttpException) {
             throw RuntimeException(httpMsg(e))
         }
