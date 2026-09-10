@@ -1,30 +1,35 @@
 package cl.efficientchile.inventario.data
 
 import retrofit2.http.Body
-import retrofit2.http.Field
-import retrofit2.http.FormUrlEncoded
 import retrofit2.http.GET
 import retrofit2.http.Header
 import retrofit2.http.POST
-import retrofit2.http.Path
+import retrofit2.http.Query
+
+// Rutas adaptadas para la API PHP alojada en Hostinger.
+// La base URL en Setup debe ser: https://scis1.powermedia.cl/
 
 interface Api {
-    @FormUrlEncoded
-    @POST("auth/login")
-    suspend fun login(
-        @Field("username") username: String,
-        @Field("password") password: String,
-    ): TokenResp
+    @POST("auth.php")
+    suspend fun login(@Body body: LoginReq): TokenResp
 
-    @GET("qr/especimen/{uid}")
+    @GET("qr.php")
     suspend fun leerEspecimen(
         @Header("Authorization") bearer: String,
-        @Path("uid") uid: String,
+        @Query("accion") accion: String = "especimen",
+        @Query("uid") uid: String,
     ): Especimen
 
-    @POST("ventas")
+    @POST("venta.php")
     suspend fun crearVenta(
         @Header("Authorization") bearer: String,
         @Body venta: VentaReq,
     ): VentaResp
 }
+
+@com.squareup.moshi.JsonClass(generateAdapter = true)
+data class LoginReq(
+    val username: String,
+    val password: String,
+    @com.squareup.moshi.Json(name = "tenant_id") val tenantId: Int = 1,
+)
