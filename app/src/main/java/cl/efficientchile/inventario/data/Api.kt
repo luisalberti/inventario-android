@@ -1,13 +1,17 @@
 package cl.efficientchile.inventario.data
 
+import okhttp3.MultipartBody
 import retrofit2.http.Body
 import retrofit2.http.GET
 import retrofit2.http.Header
+import retrofit2.http.Multipart
 import retrofit2.http.POST
+import retrofit2.http.Part
 import retrofit2.http.Query
 
-// Rutas adaptadas para la API PHP alojada en Hostinger.
-// La base URL en Setup debe ser: https://scis1.powermedia.cl/
+// Rutas de la API PHP alojada en Hostinger.
+// La base URL en Setup va con https y barra final:
+//   https://scis1.powermedia.cl/
 
 interface Api {
     @POST("auth.php")
@@ -25,6 +29,14 @@ interface Api {
         @Header("Authorization") bearer: String,
         @Body venta: VentaReq,
     ): VentaResp
+
+    /** Sube la foto del comprobante de transferencia antes de registrar la venta. */
+    @Multipart
+    @POST("comprobante.php")
+    suspend fun subirComprobante(
+        @Header("Authorization") bearer: String,
+        @Part foto: MultipartBody.Part,
+    ): ComprobanteResp
 }
 
 @com.squareup.moshi.JsonClass(generateAdapter = true)

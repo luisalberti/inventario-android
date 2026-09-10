@@ -10,21 +10,23 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import cl.efficientchile.inventario.data.Especimen
+import cl.efficientchile.inventario.data.LineaCarrito
+import cl.efficientchile.inventario.ui.ComprobanteScreen
 import cl.efficientchile.inventario.ui.HomeScreen
 import cl.efficientchile.inventario.ui.SaleScreen
 import cl.efficientchile.inventario.ui.ScannerScreen
 import cl.efficientchile.inventario.ui.SetupScreen
+import java.io.File
 
 sealed class Screen {
     data object Home : Screen()
     data object Scanner : Screen()
     data object Sale : Screen()
+    data object Comprobante : Screen()
     data object Setup : Screen()
 }
 
 class MainActivity : ComponentActivity() {
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -48,54 +50,107 @@ fun AppRoot() {
     val baseUrl by prefs.baseUrl.collectAsStateWithLifecycle(initialValue = null)
     val username by prefs.username.collectAsStateWithLifecycle(initialValue = null)
 
-    // Carrito compartido entre Scanner y Sale (en memoria — se limpia al confirmar)
-    val carrito = remember { mutableStateListOf<Especimen>() }
+    // Carrito en memoria: una linea por SKU, con los UID escaneados dentro.
+    val carrito = remember { mutableStateListOf<LineaCarrito>() }
+    // Foto del comprobante de transferencia, si la forma de pago la exige.
+    var comprobante by remember { mutableStateOf<File?>(null) }
     var pantalla by remember { mutableStateOf<Screen>(Screen.Home) }
 
-    // Decidir si hay que ir a Setup (sin token) o Home
+    fun limpiarComprobante() {
+        comprobante?.delete()
+        comprobante = null
+    }
+
     LaunchedEffect(token) {
-        if (token.isNullOrBlank() && pantalla !is Screen.Setup) {
-            pantalla = Screen.Setup
-        }
+        if (token.isNullOrBlank() && pantalla !is Screen.Setup) pantalla = Screen.Setup
     }
 
     when (pantalla) {
         Screen.Setup -> SetupScreen(
             repo = repo,
-            urlPrevia = baseUrl ?: "http://192.168.1.10:8000",
+            urlPrevia = baseUrl ?: "https://scis1.powermedia.cl/",
             onOk = { pantalla = Screen.Home },
         )
+
         Screen.Home -> HomeScreen(
             username = username,
             urlServer = baseUrl,
             carrito = carrito,
             onEscanear = { pantalla = Screen.Scanner },
             onVer = { pantalla = Screen.Sale },
-            onVaciar = { carrito.clear() },
+            onVaciar = { carrito.clear(); limpiarComprobante() },
             onConfig = { pantalla = Screen.Setup },
         )
+
         Screen.Scanner -> ScannerScreen(
             repo = repo,
             baseUrl = baseUrl.orEmpty(),
             token = token.orEmpty(),
-            uidsYaEnCarrito = carrito.map { it.uid }.toSet(),
+            uidsYaEnCarrito = carrito.flatMap { it.uids }.toSet(),
             onEscaneado = { esp ->
-                carrito.add(esp)
+                // Mismo SKU -> se suma a la linea existente en vez de duplicarla.
+                val i = carrito.indexOfFirst { it.sku == esp.sku }
+                if (i >= 0) {
+                    val l = carrito[i]
+                    if (esp.uid !in l.uids) {
+                        carrito[i] = l.copy(
+                            uids = l.uids + esp.uid,
+                            cantidad = l.cantidad + 1,
+                        )
+                    }
+                } else {
+                    carrito.add(
+                        LineaCarrito(
+                            sku = esp.sku,
+                            nombre = esp.nombre,
+                            precioVenta = esp.precioVenta,
+                            uids = listOf(esp.uid),
+                            cantidad = 1,
+                        )
+                    )
+                }
                 pantalla = Screen.Sale
             },
             onCerrar = { pantalla = Screen.Home },
         )
+
         Screen.Sale -> SaleScreen(
             repo = repo,
             baseUrl = baseUrl.orEmpty(),
             token = token.orEmpty(),
             carrito = carrito,
+            comprobante = comprobante,
+            onCambiarCantidad = { i, nueva ->
+                if (i in carrito.indices && nueva >= 1) {
+                    val l = carrito[i]
+                    // Si baja la cantidad por debajo de los QR escaneados, se
+                    // sueltan los ultimos: el servidor no debe marcarlos vendidos.
+                    val uids = if (nueva < l.uids.size) l.uids.take(nueva) else l.uids
+                    carrito[i] = l.copy(uids = uids, cantidad = nueva)
+                }
+            },
+            onQuitarLinea = { i -> if (i in carrito.indices) carrito.removeAt(i) },
             onAgregarOtro = { pantalla = Screen.Scanner },
+            onTomarComprobante = { pantalla = Screen.Comprobante },
+            onQuitarComprobante = {
+                limpiarComprobante()
+                pantalla = Screen.Comprobante
+            },
             onConfirmado = {
                 carrito.clear()
+                limpiarComprobante()
                 pantalla = Screen.Home
             },
             onCancelar = { pantalla = Screen.Home },
+        )
+
+        Screen.Comprobante -> ComprobanteScreen(
+            onListo = { archivo ->
+                comprobante?.delete()
+                comprobante = archivo
+                pantalla = Screen.Sale
+            },
+            onCancelar = { pantalla = Screen.Sale },
         )
     }
 }

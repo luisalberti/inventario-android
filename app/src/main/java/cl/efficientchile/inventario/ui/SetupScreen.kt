@@ -37,14 +37,14 @@ fun SetupScreen(repo: Repo, urlPrevia: String, onOk: () -> Unit) {
         Spacer(Modifier.height(32.dp))
         Text("Inventario", style = MaterialTheme.typography.headlineLarge)
         Text(
-            "Conecta este celular al servidor Inventario que corre en tu PC.",
+            "Conecta este celular al servidor donde está la base de datos.",
             style = MaterialTheme.typography.bodyMedium,
         )
 
         OutlinedTextField(
             value = url, onValueChange = { url = it.trim() },
             label = { Text("URL del servidor") },
-            supportingText = { Text("Ej: http://192.168.1.10:8000  ·  https://tu-dominio.cl") },
+            supportingText = { Text("Ej: https://scis1.powermedia.cl/") },
             singleLine = true, modifier = Modifier.fillMaxWidth(),
         )
         OutlinedTextField(
@@ -87,7 +87,9 @@ fun SetupScreen(repo: Repo, urlPrevia: String, onOk: () -> Unit) {
                 cargando = true
                 scope.launch {
                     try {
-                        repo.login(url, usuario, password)
+                        val limpia = normalizarUrl(url)
+                        url = limpia
+                        repo.login(limpia, usuario, password)
                         onOk()
                     } catch (e: Exception) {
                         error = e.message ?: "Error al conectar"
@@ -106,11 +108,34 @@ fun SetupScreen(repo: Repo, urlPrevia: String, onOk: () -> Unit) {
 
         Spacer(Modifier.height(16.dp))
         Text(
-            "El servidor puede ser Wi-Fi local (http://IP:8000) o un dominio " +
-                    "público con HTTPS. Se guarda una sesión y no vuelve a pedirte " +
+            "Escribe solo el dominio si quieres: la app le agrega https:// y la " +
+                    "barra final. Se guarda una sesión y no vuelve a pedirte " +
                     "contraseña hasta que la cierres.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
+}
+
+/**
+ * Deja la URL en la forma que el backend necesita.
+ *
+ * Un dominio escrito con http:// hace que Hostinger responda 301 hacia
+ * https, y ese redirect convierte el POST del login en un GET: el servidor
+ * contesta "Solo POST" y parece que la clave está mala. Por eso se fuerza
+ * https salvo cuando apunta a una IP local, donde sí puede no haber
+ * certificado.
+ */
+internal fun normalizarUrl(entrada: String): String {
+    var u = entrada.trim()
+    if (u.isEmpty()) return u
+    if (!u.startsWith("http://") && !u.startsWith("https://")) u = "https://$u"
+    if (u.startsWith("http://")) {
+        val host = u.removePrefix("http://").substringBefore("/").substringBefore(":")
+        val esLocal = host == "localhost" ||
+                host.matches(Regex("""^\d{1,3}(\.\d{1,3}){3}$"""))
+        if (!esLocal) u = "https://" + u.removePrefix("http://")
+    }
+    if (!u.endsWith("/")) u += "/"
+    return u
 }

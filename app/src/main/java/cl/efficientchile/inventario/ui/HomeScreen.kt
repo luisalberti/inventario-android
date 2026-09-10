@@ -13,18 +13,22 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import cl.efficientchile.inventario.data.Especimen
+import cl.efficientchile.inventario.data.Dinero
+import cl.efficientchile.inventario.data.LineaCarrito
 
 @Composable
 fun HomeScreen(
     username: String?,
     urlServer: String?,
-    carrito: List<Especimen>,
+    carrito: List<LineaCarrito>,
     onEscanear: () -> Unit,
     onVer: () -> Unit,
     onVaciar: () -> Unit,
     onConfig: () -> Unit,
 ) {
+    val unidades = carrito.sumOf { it.cantidad }
+    val total = carrito.sumOf { it.subtotal }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -40,12 +44,12 @@ fun HomeScreen(
             Surface(tonalElevation = 4.dp) {
                 Column(Modifier.padding(16.dp)) {
                     Text(
-                        text = "Empleado: ${username ?: "-"}",
+                        "Empleado: ${username ?: "-"}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Text(
-                        text = "Servidor: ${urlServer ?: "-"}",
+                        "Servidor: ${urlServer ?: "-"}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -62,12 +66,13 @@ fun HomeScreen(
             Spacer(Modifier.height(24.dp))
             Button(
                 onClick = onEscanear,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(96.dp),
+                modifier = Modifier.fillMaxWidth().height(96.dp),
             ) {
-                Icon(Icons.Default.QrCodeScanner, contentDescription = null,
-                     modifier = Modifier.size(32.dp))
+                Icon(
+                    Icons.Default.QrCodeScanner,
+                    contentDescription = null,
+                    modifier = Modifier.size(32.dp),
+                )
                 Spacer(Modifier.width(12.dp))
                 Text("Escanear QR", style = MaterialTheme.typography.headlineSmall)
             }
@@ -77,7 +82,7 @@ fun HomeScreen(
                 Icon(Icons.Default.ShoppingCart, contentDescription = null)
                 Spacer(Modifier.width(8.dp))
                 Text(
-                    "Carrito actual (${carrito.size})",
+                    "Carrito ($unidades ${if (unidades == 1) "unidad" else "unidades"})",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                 )
@@ -87,6 +92,7 @@ fun HomeScreen(
                 }
             }
             HorizontalDivider()
+
             if (carrito.isEmpty()) {
                 Spacer(Modifier.height(40.dp))
                 Text(
@@ -96,17 +102,44 @@ fun HomeScreen(
                 )
             } else {
                 LazyColumn(Modifier.weight(1f)) {
-                    items(carrito) { e ->
+                    items(carrito) { l ->
                         ListItem(
-                            headlineContent = { Text(e.nombre) },
-                            supportingContent = { Text("SKU ${e.sku} · $${e.precioVenta.toInt()}") },
-                            trailingContent = { Text("#${e.uid.take(6)}",
-                                style = MaterialTheme.typography.bodySmall) },
+                            headlineContent = { Text(l.nombre) },
+                            supportingContent = {
+                                Text("SKU ${l.sku} · ${Dinero.clp(l.precioVenta)} c/u")
+                            },
+                            trailingContent = {
+                                Column(horizontalAlignment = Alignment.End) {
+                                    Text(
+                                        "x${l.cantidad}",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold,
+                                    )
+                                    Text(
+                                        Dinero.clp(l.subtotal),
+                                        style = MaterialTheme.typography.bodySmall,
+                                    )
+                                }
+                            },
                         )
                         HorizontalDivider()
                     }
                 }
-                Spacer(Modifier.height(8.dp))
+                Row(
+                    Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Text(
+                        "Total",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(
+                        Dinero.clp(total),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
                 Button(onClick = onVer, modifier = Modifier.fillMaxWidth()) {
                     Text("Continuar con la venta")
                 }

@@ -2,12 +2,16 @@ package cl.efficientchile.inventario.data
 
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
+import okhttp3.RequestBody.Companion.asRequestBody
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.HttpException
 import retrofit2.Retrofit
 import retrofit2.converter.moshi.MoshiConverterFactory
+import java.io.File
 import java.util.concurrent.TimeUnit
 
 class Repo(private val prefs: Prefs) {
@@ -18,14 +22,19 @@ class Repo(private val prefs: Prefs) {
         val normalizado = if (baseUrl.endsWith("/")) baseUrl else "$baseUrl/"
         cachedApi?.let { if (it.first == normalizado) return it.second }
         val client = OkHttpClient.Builder()
+            // Hostinger responde 301 a todo lo que llegue por http. Si OkHttp
+            // sigue ese redirect convierte el POST en GET y el backend
+            // contesta "Solo POST". Con esto el 301 se ve tal cual y queda
+            // claro que falta la "s" de https en la URL.
             .protocols(listOf(Protocol.HTTP_1_1))
             .followRedirects(false)
             .followSslRedirects(false)
             .connectTimeout(20, TimeUnit.SECONDS)
-            .readTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(60, TimeUnit.SECONDS)
+            .writeTimeout(60, TimeUnit.SECONDS)
             .addInterceptor { chain ->
                 val req = chain.request().newBuilder()
-                    .header("User-Agent", "InventarioApp/1.0")
+                    .header("User-Agent", "InventarioApp/2.0")
                     .header("Accept", "application/json")
                     .build()
                 chain.proceed(req)
@@ -48,7 +57,12 @@ class Repo(private val prefs: Prefs) {
         val moshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
         val adapter = moshi.adapter(ApiError::class.java)
         val detail = try { adapter.fromJson(body)?.detail } catch (_: Exception) { null }
-        return detail ?: "HTTP ${e.code()}: ${e.message()}"
+        if (detail != null) return detail
+        return when (e.code()) {
+            301, 302, 307, 308 ->
+                "El servidor redirige la conexion. Revisa que la URL empiece con https://"
+            else -> "HTTP ${e.code()}: ${e.message()}"
+        }
     }
 
     suspend fun login(url: String, user: String, password: String, tenantId: Int = 1) {
@@ -71,6 +85,18 @@ class Repo(private val prefs: Prefs) {
     suspend fun crearVenta(url: String, token: String, venta: VentaReq): VentaResp {
         try {
             return api(url).crearVenta("Bearer $token", venta)
+        } catch (e: HttpException) {
+            throw RuntimeException(httpMsg(e))
+        }
+    }
+
+    /** Sube la foto del comprobante y devuelve el token con que se liga a la venta. */
+    suspend fun subirComprobante(url: String, token: String, archivo: File): ComprobanteResp {
+        try {
+            val tipo = if (archivo.extension.lowercase() == "png") "image/png" else "image/jpeg"
+            val cuerpo = archivo.asRequestBody(tipo.toMediaType())
+            val parte = MultipartBody.Part.createFormData("foto", archivo.name, cuerpo)
+            return api(url).subirComprobante("Bearer $token", parte)
         } catch (e: HttpException) {
             throw RuntimeException(httpMsg(e))
         }
