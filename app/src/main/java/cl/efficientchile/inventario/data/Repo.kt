@@ -3,6 +3,7 @@ package cl.efficientchile.inventario.data
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import okhttp3.OkHttpClient
+import okhttp3.Protocol
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.HttpException
 import retrofit2.Retrofit
@@ -17,8 +18,18 @@ class Repo(private val prefs: Prefs) {
         val normalizado = if (baseUrl.endsWith("/")) baseUrl else "$baseUrl/"
         cachedApi?.let { if (it.first == normalizado) return it.second }
         val client = OkHttpClient.Builder()
+            .protocols(listOf(Protocol.HTTP_1_1))
+            .followRedirects(false)
+            .followSslRedirects(false)
             .connectTimeout(20, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
+            .addInterceptor { chain ->
+                val req = chain.request().newBuilder()
+                    .header("User-Agent", "InventarioApp/1.0")
+                    .header("Accept", "application/json")
+                    .build()
+                chain.proceed(req)
+            }
             .addInterceptor(HttpLoggingInterceptor().setLevel(HttpLoggingInterceptor.Level.BASIC))
             .build()
         val moshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
