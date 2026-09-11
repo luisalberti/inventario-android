@@ -68,7 +68,14 @@ class Repo(private val prefs: Prefs) {
     suspend fun login(url: String, user: String, password: String, tenantId: Int = 1) {
         try {
             val t = api(url).login(LoginReq(user, password, tenantId))
-            prefs.guardarLogin(url, t.accessToken, user)
+            prefs.guardarLogin(
+                url = url,
+                token = t.accessToken,
+                user = user,
+                empresa = t.empresa,
+                exigirNumero = t.exigirNumero,
+                exigirFoto = t.exigirFoto,
+            )
         } catch (e: HttpException) {
             throw RuntimeException(httpMsg(e))
         }

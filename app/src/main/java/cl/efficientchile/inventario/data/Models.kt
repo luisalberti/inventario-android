@@ -13,6 +13,13 @@ data class TokenResp(
     @Json(name = "access_token") val accessToken: String,
     @Json(name = "token_type") val tokenType: String,
     val rol: String,
+    val empresa: String? = null,
+    val licencia: String? = null,
+    @Json(name = "licencia_aviso") val licenciaAviso: String? = null,
+    // Que pedirle al vendedor. Lo configura el cliente en el panel; la app
+    // arma la pantalla de venta con esto y no vuelve a preguntar.
+    @Json(name = "exigir_numero") val exigirNumero: Boolean = true,
+    @Json(name = "exigir_foto") val exigirFoto: String = "transferencia",
 )
 
 /** Datos publicos del QR escaneado (qr.php?accion=especimen) */
@@ -57,6 +64,7 @@ data class VentaReq(
     @Json(name = "tipo_documento") val tipoDocumento: String,   // boleta | factura
     @Json(name = "forma_pago") val formaPago: String,           // efectivo | tarjeta | transferencia
     @Json(name = "monto_pagado") val montoPagado: Double? = null,
+    @Json(name = "numero_documento") val numeroDocumento: String? = null,
     @Json(name = "comprobante_token") val comprobanteToken: String? = null,
     @Json(name = "banco_operacion") val bancoOperacion: String? = null,
     @Json(name = "rut_empresa") val rutEmpresa: String? = null,
@@ -70,6 +78,7 @@ data class VentaReq(
 data class VentaResp(
     val id: Int,
     @Json(name = "numero_transaccion") val numeroTransaccion: String? = null,
+    @Json(name = "numero_documento") val numeroDocumento: String? = null,
     val total: Double? = null,
     val neto: Double? = null,
     val iva: Double? = null,
