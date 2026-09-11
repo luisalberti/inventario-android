@@ -120,22 +120,21 @@ fun SetupScreen(repo: Repo, urlPrevia: String, onOk: () -> Unit) {
 /**
  * Deja la URL en la forma que el backend necesita.
  *
- * Un dominio escrito con http:// hace que Hostinger responda 301 hacia
+ * Un dominio escrito con http:// hace que el servidor responda 301 hacia
  * https, y ese redirect convierte el POST del login en un GET: el servidor
- * contesta "Solo POST" y parece que la clave está mala. Por eso se fuerza
- * https salvo cuando apunta a una IP local, donde sí puede no haber
- * certificado.
+ * contesta "Solo POST" y parece que la clave está mala.
+ *
+ * Desde la v7 se fuerza https SIEMPRE, también en IPs locales. Antes se hacía
+ * una excepción para la red local, pensando en pruebas sin certificado; el
+ * problema es que por ahí viajan la contraseña del vendedor y el token de
+ * sesión, y cualquiera en la misma wifi los lee. El servidor ya no atiende en
+ * claro de ninguna forma, así que la excepción tampoco servía de nada.
  */
 internal fun normalizarUrl(entrada: String): String {
     var u = entrada.trim()
     if (u.isEmpty()) return u
     if (!u.startsWith("http://") && !u.startsWith("https://")) u = "https://$u"
-    if (u.startsWith("http://")) {
-        val host = u.removePrefix("http://").substringBefore("/").substringBefore(":")
-        val esLocal = host == "localhost" ||
-                host.matches(Regex("""^\d{1,3}(\.\d{1,3}){3}$"""))
-        if (!esLocal) u = "https://" + u.removePrefix("http://")
-    }
+    if (u.startsWith("http://")) u = "https://" + u.removePrefix("http://")
     if (!u.endsWith("/")) u += "/"
     return u
 }
