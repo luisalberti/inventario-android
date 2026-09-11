@@ -14,7 +14,7 @@
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher"
         android:theme="@style/Theme.Inventario"
-        android:usesCleartextTraffic="true"
+        android:usesCleartextTraffic="false"
         android:supportsRtl="true"
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
