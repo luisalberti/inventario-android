@@ -49,9 +49,6 @@ fun AppRoot() {
     val token by prefs.token.collectAsStateWithLifecycle(initialValue = null)
     val baseUrl by prefs.baseUrl.collectAsStateWithLifecycle(initialValue = null)
     val username by prefs.username.collectAsStateWithLifecycle(initialValue = null)
-    // Que pedirle al vendedor: lo define el cliente en el panel y llega en el login.
-    val exigirNumero by prefs.exigirNumero.collectAsStateWithLifecycle(initialValue = true)
-    val exigirFoto by prefs.exigirFoto.collectAsStateWithLifecycle(initialValue = "transferencia")
 
     // Carrito en memoria: una linea por SKU, con los UID escaneados dentro.
     val carrito = remember { mutableStateListOf<LineaCarrito>() }
@@ -123,8 +120,6 @@ fun AppRoot() {
             token = token.orEmpty(),
             carrito = carrito,
             comprobante = comprobante,
-            exigirNumero = exigirNumero,
-            exigirFoto = exigirFoto,
             onCambiarCantidad = { i, nueva ->
                 if (i in carrito.indices && nueva >= 1) {
                     val l = carrito[i]
