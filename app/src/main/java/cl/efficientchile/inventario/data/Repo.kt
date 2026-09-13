@@ -65,17 +65,20 @@ class Repo(private val prefs: Prefs) {
         }
     }
 
-    suspend fun login(url: String, user: String, password: String, tenantId: Int = 1) {
+    /**
+     * Entra y devuelve el aviso que mande el servidor, o cadena vacia.
+     *
+     * El rechazo por permiso cortado o por pago vencido no llega por aca: el
+     * servidor responde 403 o 402 y httpMsg() ya saca el motivo del cuerpo,
+     * asi que el vendedor ve la frase que escribio el proveedor y no un
+     * codigo. Lo que se devuelve aca es el aviso de que TODAVIA funciona pero
+     * esta por vencer, que conviene mostrar sin bloquear nada.
+     */
+    suspend fun login(url: String, user: String, password: String, tenantId: Int = 1): String {
         try {
             val t = api(url).login(LoginReq(user, password, tenantId))
-            prefs.guardarLogin(
-                url = url,
-                token = t.accessToken,
-                user = user,
-                empresa = t.empresa,
-                exigirNumero = t.exigirNumero,
-                exigirFoto = t.exigirFoto,
-            )
+            prefs.guardarLogin(url, t.accessToken, user)
+            return if (t.licencia == "por_vencer" || t.licencia == "gracia") t.licenciaAviso else ""
         } catch (e: HttpException) {
             throw RuntimeException(httpMsg(e))
         }

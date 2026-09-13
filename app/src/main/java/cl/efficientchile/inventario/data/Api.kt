@@ -44,4 +44,9 @@ data class LoginReq(
     val username: String,
     val password: String,
     @com.squareup.moshi.Json(name = "tenant_id") val tenantId: Int = 1,
+    // Le dice al servidor que quien entra es la app. Si el proveedor corto la
+    // app para esta empresa, el rechazo llega aca con su motivo, en vez de
+    // dejar entrar y fallar recien al intentar cerrar una venta con el cliente
+    // esperando adelante.
+    val origen: String = "app",
 )
