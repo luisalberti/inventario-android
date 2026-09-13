@@ -36,10 +36,6 @@ fun SaleScreen(
     token: String,
     carrito: List<LineaCarrito>,
     comprobante: File?,
-    /** El cliente decide en Ajustes si el numero de boleta es obligatorio. */
-    exigirNumero: Boolean,
-    /** "nunca" | "transferencia" | "siempre" */
-    exigirFoto: String,
     onCambiarCantidad: (Int, Int) -> Unit,
     onQuitarLinea: (Int) -> Unit,
     onAgregarOtro: () -> Unit,
@@ -60,13 +56,6 @@ fun SaleScreen(
     var tipoDoc by remember { mutableStateOf("boleta") }
     var formaPago by remember { mutableStateOf("efectivo") }
     var monto by remember { mutableStateOf("") }
-    var numeroDoc by remember { mutableStateOf("") }
-
-    // La foto es obligatoria segun lo que configuro el cliente. Cuando no lo
-    // es, igual se ofrece el boton: hay ventas puntuales que conviene
-    // respaldar sin que eso frene todas las demas.
-    val fotoObligatoria = exigirFoto == "siempre" ||
-            (exigirFoto == "transferencia" && formaPago == "transferencia")
 
     var rut by remember { mutableStateOf("") }
     var razon by remember { mutableStateOf("") }
@@ -92,13 +81,6 @@ fun SaleScreen(
                         fontWeight = FontWeight.Bold,
                     )
                     Text("Total: ${Dinero.clp(v.total ?: total)}")
-                    if (!v.numeroDocumento.isNullOrBlank()) {
-                        Text(
-                            "Boleta ${v.numeroDocumento}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
                     Text(
                         "Neto ${Dinero.clp(v.neto ?: neto)} · IVA ${Dinero.clp(v.iva ?: iva)}",
                         style = MaterialTheme.typography.bodySmall,
@@ -251,28 +233,7 @@ fun SaleScreen(
                 }
             }
 
-            // --------------------------------------------- N de boleta
-            OutlinedTextField(
-                numeroDoc,
-                { numeroDoc = it.take(60) },
-                label = {
-                    Text(
-                        if (exigirNumero) "N° de boleta o comprobante"
-                        else "N° de boleta o comprobante (opcional)"
-                    )
-                },
-                supportingText = {
-                    Text(
-                        "Cópialo del papel que imprimió la máquina. Es lo que permite " +
-                                "cuadrar después con el SII."
-                    )
-                },
-                isError = exigirNumero && numeroDoc.isBlank(),
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-            )
-
-            if (exigirFoto != "nunca") {
+            if (formaPago == "transferencia") {
                 Surface(
                     tonalElevation = 2.dp,
                     modifier = Modifier.fillMaxWidth(),
@@ -283,34 +244,21 @@ fun SaleScreen(
                     ) {
                         if (comprobante == null) {
                             Text(
-                                if (fotoObligatoria) "Falta la foto del comprobante"
-                                else "Foto del comprobante (opcional)",
+                                "Falta la foto del comprobante",
                                 style = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.SemiBold,
                             )
                             Text(
-                                if (formaPago == "transferencia")
-                                    "Fotografía la pantalla del cliente con la transferencia hecha. " +
-                                            "Podrás revisarla antes de aceptarla."
-                                else
-                                    "Puedes adjuntar una foto del comprobante si esta venta " +
-                                            "necesita respaldo.",
+                                "Fotografía la pantalla del cliente con la transferencia hecha. " +
+                                        "Podrás revisarla antes de aceptarla.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
-                            if (fotoObligatoria) {
-                                Button(
-                                    onClick = onTomarComprobante,
-                                    enabled = !enviando,
-                                    modifier = Modifier.fillMaxWidth(),
-                                ) { Text("Tomar foto del comprobante") }
-                            } else {
-                                OutlinedButton(
-                                    onClick = onTomarComprobante,
-                                    enabled = !enviando,
-                                    modifier = Modifier.fillMaxWidth(),
-                                ) { Text("Adjuntar foto") }
-                            }
+                            Button(
+                                onClick = onTomarComprobante,
+                                enabled = !enviando,
+                                modifier = Modifier.fillMaxWidth(),
+                            ) { Text("Tomar foto del comprobante") }
                         } else {
                             Text(
                                 "Comprobante listo ✓",
@@ -353,17 +301,14 @@ fun SaleScreen(
 
             Button(
                 enabled = !enviando && carrito.isNotEmpty() && puedeConfirmar(
-                    tipoDoc, formaPago, monto, total, rut, razon, direccion, giro,
-                    comprobante, numeroDoc, exigirNumero, fotoObligatoria,
+                    tipoDoc, formaPago, monto, total, rut, razon, direccion, giro, comprobante,
                 ),
                 onClick = {
                     enviando = true
                     error = null
                     scope.launch {
                         try {
-                            // Si hay foto se sube, sea o no obligatoria para
-                            // esta forma de pago.
-                            val tokenComp = if (comprobante != null) {
+                            val tokenComp = if (formaPago == "transferencia" && comprobante != null) {
                                 estado = "Subiendo comprobante…"
                                 repo.subirComprobante(baseUrl, token, comprobante).token
                             } else null
@@ -375,7 +320,6 @@ fun SaleScreen(
                                 formaPago = formaPago,
                                 montoPagado = if (formaPago == "efectivo")
                                     monto.toDoubleOrNull() else null,
-                                numeroDocumento = numeroDoc.trim().ifBlank { null },
                                 comprobanteToken = tokenComp,
                                 rutEmpresa = if (tipoDoc == "factura") rut else null,
                                 razonSocial = if (tipoDoc == "factura") razon else null,
@@ -501,16 +445,12 @@ private fun puedeConfirmar(
     direccion: String,
     giro: String,
     comprobante: File?,
-    numeroDoc: String,
-    exigirNumero: Boolean,
-    fotoObligatoria: Boolean,
 ): Boolean {
     if (formaPago == "efectivo") {
         val m = monto.toDoubleOrNull() ?: return false
         if (m < total) return false
     }
-    if (exigirNumero && numeroDoc.isBlank()) return false
-    if (fotoObligatoria && comprobante == null) return false
+    if (formaPago == "transferencia" && comprobante == null) return false
     if (tipoDoc == "factura") {
         if (rut.isBlank() || razon.isBlank() || direccion.isBlank() || giro.isBlank()) return false
     }
