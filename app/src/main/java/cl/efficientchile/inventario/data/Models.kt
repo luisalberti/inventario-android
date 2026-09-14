@@ -64,8 +64,16 @@ data class VentaReq(
     @Json(name = "tipo_documento") val tipoDocumento: String,   // boleta | factura
     @Json(name = "forma_pago") val formaPago: String,           // efectivo | tarjeta | transferencia
     @Json(name = "monto_pagado") val montoPagado: Double? = null,
+    // El numero del papel. venta.php lo exige salvo que el cliente lo apague
+    // desde Ajustes; la app lo manda siempre que el vendedor lo escriba.
+    @Json(name = "numero_documento") val numeroDocumento: String? = null,
     @Json(name = "comprobante_token") val comprobanteToken: String? = null,
     @Json(name = "banco_operacion") val bancoOperacion: String? = null,
+    // De donde salio el numero: tecleado ('manual') o leido de la foto
+    // ('ocr'). Sirve para saber despues si el lector merece confianza, y
+    // para revisar primero las ventas que dependieron de el.
+    @Json(name = "cobro_origen") val cobroOrigen: String? = null,
+    @Json(name = "cobro_ultimos4") val cobroUltimos4: String? = null,
     @Json(name = "rut_empresa") val rutEmpresa: String? = null,
     @Json(name = "razon_social") val razonSocial: String? = null,
     @Json(name = "direccion_comercial") val direccionComercial: String? = null,

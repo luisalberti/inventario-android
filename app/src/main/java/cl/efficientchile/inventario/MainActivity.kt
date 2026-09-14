@@ -13,9 +13,12 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import cl.efficientchile.inventario.data.LineaCarrito
 import cl.efficientchile.inventario.ui.ComprobanteScreen
 import cl.efficientchile.inventario.ui.HomeScreen
+import cl.efficientchile.inventario.ui.OcrScreen
 import cl.efficientchile.inventario.ui.SaleScreen
 import cl.efficientchile.inventario.ui.ScannerScreen
 import cl.efficientchile.inventario.ui.SetupScreen
+import cl.efficientchile.inventario.ui.TemaInventario
+import cl.efficientchile.inventario.util.LectorBoleta
 import java.io.File
 
 sealed class Screen {
@@ -23,6 +26,7 @@ sealed class Screen {
     data object Scanner : Screen()
     data object Sale : Screen()
     data object Comprobante : Screen()
+    data object Boleta : Screen()
     data object Setup : Screen()
 }
 
@@ -31,7 +35,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            MaterialTheme {
+            TemaInventario {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     AppRoot()
                 }
@@ -55,6 +59,9 @@ fun AppRoot() {
     // Foto del comprobante de transferencia, si la forma de pago la exige.
     var comprobante by remember { mutableStateOf<File?>(null) }
     var pantalla by remember { mutableStateOf<Screen>(Screen.Home) }
+    // Lo ultimo que leyo la camara de una boleta, esperando que el
+    // formulario lo consuma. Se limpia apenas se usa.
+    var lecturaBoleta by remember { mutableStateOf<LectorBoleta.Lectura?>(null) }
 
     fun limpiarComprobante() {
         comprobante?.delete()
@@ -109,9 +116,14 @@ fun AppRoot() {
                         )
                     )
                 }
-                pantalla = Screen.Sale
+                /* Antes aca decia "pantalla = Screen.Sale", y ese era el
+                   motivo real de que la app se sintiera a tirones: cada QR
+                   leido devolvia al formulario, y para escanear el siguiente
+                   habia que bajar hasta el final y apretar otro boton. Una
+                   venta de diez plantas eran diez rebotes. Ahora la camara se
+                   queda abierta y el vendedor escanea los diez seguidos. */
             },
-            onCerrar = { pantalla = Screen.Home },
+            onCerrar = { pantalla = if (carrito.isEmpty()) Screen.Home else Screen.Sale },
         )
 
         Screen.Sale -> SaleScreen(
@@ -136,9 +148,13 @@ fun AppRoot() {
                 limpiarComprobante()
                 pantalla = Screen.Comprobante
             },
+            onEscanearBoleta = { pantalla = Screen.Boleta },
+            lecturaBoleta = lecturaBoleta,
+            onLecturaUsada = { lecturaBoleta = null },
             onConfirmado = {
                 carrito.clear()
                 limpiarComprobante()
+                lecturaBoleta = null
                 pantalla = Screen.Home
             },
             onCancelar = { pantalla = Screen.Home },
@@ -148,6 +164,20 @@ fun AppRoot() {
             onListo = { archivo ->
                 comprobante?.delete()
                 comprobante = archivo
+                pantalla = Screen.Sale
+            },
+            onCancelar = { pantalla = Screen.Sale },
+        )
+
+        Screen.Boleta -> OcrScreen(
+            totalEsperado = carrito.sumOf { it.subtotal },
+            onListo = { lectura, foto ->
+                lecturaBoleta = lectura
+                /* La foto de la boleta pasa a ser el comprobante de la venta.
+                   Es la misma foto: pedirla dos veces seria pedirle al
+                   vendedor que fotografie el mismo papel de nuevo. */
+                comprobante?.delete()
+                comprobante = foto
                 pantalla = Screen.Sale
             },
             onCancelar = { pantalla = Screen.Sale },
