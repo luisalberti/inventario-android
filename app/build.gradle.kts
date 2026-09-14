@@ -32,7 +32,18 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlinOptions { jvmTarget = "17" }
+    kotlinOptions {
+        jvmTarget = "17"
+        /* Material 3 marca como experimental media biblioteca -- TopAppBar y
+           Surface con onClick, entre otras-- y el compilador lo trata como
+           error, no como aviso. Poner @OptIn archivo por archivo obliga a
+           acordarse cada vez que se agrega una pantalla, y el build se cae en
+           GitHub Actions veinte minutos despues. Se declara una sola vez aca. */
+        freeCompilerArgs += listOf(
+            "-opt-in=androidx.compose.material3.ExperimentalMaterial3Api",
+            "-opt-in=androidx.compose.foundation.ExperimentalFoundationApi",
+        )
+    }
 
     buildFeatures { compose = true }
     composeOptions { kotlinCompilerExtensionVersion = "1.5.14" }

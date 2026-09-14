@@ -1,9 +1,7 @@
 package cl.efficientchile.inventario.ui
 
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Typography
-import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
@@ -62,10 +60,9 @@ private val claro = lightColorScheme(
     onError = Blanco,
 )
 
-/* El vendedor usa esto de dia, en un mesón, muchas veces con el telefono en
-   una mano. El modo oscuro no le sirve de nada y duplica las combinaciones
-   que hay que revisar, asi que la app se queda en claro a proposito. */
-private val oscuro = claro
+/* No hay esquema oscuro a proposito: el vendedor usa esto de dia, en un
+   mesón, muchas veces con el telefono en una mano. El modo oscuro no le sirve
+   y duplica las combinaciones de color que hay que medir. */
 
 private val tipos = Typography(
     displaySmall = TextStyle(fontSize = 34.sp, fontWeight = FontWeight.Bold),
@@ -80,6 +77,5 @@ private val tipos = Typography(
 
 @Composable
 fun TemaInventario(contenido: @Composable () -> Unit) {
-    @Suppress("UNUSED_EXPRESSION") isSystemInDarkTheme()
     MaterialTheme(colorScheme = claro, typography = tipos, content = contenido)
 }

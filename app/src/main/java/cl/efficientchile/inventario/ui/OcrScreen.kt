@@ -173,11 +173,16 @@ fun OcrScreen(
             ) {
                 /* El descuadre contra el total de la venta es el aviso que de
                    verdad salva plata: si la boleta dice otra cosa que el
-                   carrito, alguien cobro de menos o escaneo de mas. */
-                val descuadre = L.total != null &&
-                    kotlin.math.abs(L.total - totalEsperado) > 2
+                   carrito, alguien cobro de menos o escaneo de mas.
 
-                if (descuadre) {
+                   El total se saca a una variable local en vez de usarlo
+                   directo: el compilador no siempre acepta el smart cast de
+                   una propiedad, y eso revienta el build sin avisar antes. */
+                val totalLeido = L.total
+                val descuadre = totalLeido != null &&
+                    kotlin.math.abs(totalLeido - totalEsperado) > 2
+
+                if (descuadre && totalLeido != null) {
                     Surface(
                         color = MaterialTheme.colorScheme.errorContainer,
                         shape = MaterialTheme.shapes.medium,
@@ -188,7 +193,7 @@ fun OcrScreen(
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.error)
                             Text(
-                                "La boleta dice ${Dinero.clp(L.total!!.toDouble())} y la venta " +
+                                "La boleta dice ${Dinero.clp(totalLeido.toDouble())} y la venta " +
                                     "suma ${Dinero.clp(totalEsperado)}. Revisa antes de seguir.",
                                 style = MaterialTheme.typography.bodySmall,
                             )

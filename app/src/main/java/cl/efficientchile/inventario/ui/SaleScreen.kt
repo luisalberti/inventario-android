@@ -142,12 +142,15 @@ fun SaleScreen(
                 /* La barra de avance va sobre el marino y no sobre el blanco.
                    Medido: cyan sobre blanco da 2,8 a 1 y se pierde; sobre el
                    marino da 5,5 a 1 y se ve a un brazo de distancia. */
+                /* Sin drawStopIndicator: ese parametro llego en Material 3
+                   1.3.0 y el BOM fijado trae la 1.2.1. Compilar contra una
+                   firma que no existe es el tipo de error que solo aparece en
+                   el build, veinte minutos despues de subir el codigo. */
                 LinearProgressIndicator(
                     progress = { avanceDe(paso, tipoDoc) },
                     modifier = Modifier.fillMaxWidth().height(4.dp),
                     color = Cyan,
                     trackColor = MarinoSuave,
-                    drawStopIndicator = {},
                 )
             }
         },
