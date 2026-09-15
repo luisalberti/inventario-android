@@ -4,6 +4,15 @@ plugins {
     id("com.google.devtools.ksp")
 }
 
+/* Firma propia y estable. GitHub Actions crea una llave de prueba NUEVA en
+   cada build: el APK queda firmado, pero el celular rechaza instalarlo encima
+   de la version anterior porque la firma no coincide. Si el workflow entrega
+   un keystore (secret FIRMA_KEYSTORE_BASE64), todos los builds salen con la
+   misma llave y se actualizan sin desinstalar. Si no lo entrega, se usa la
+   llave de prueba: igual queda firmado e instalable. */
+val firmaArchivo: String? = System.getenv("FIRMA_ARCHIVO")
+val hayFirmaPropia = !firmaArchivo.isNullOrBlank() && file(firmaArchivo!!).exists()
+
 android {
     namespace = "cl.efficientchile.inventario"
     compileSdk = 34
@@ -17,7 +26,23 @@ android {
         versionName = "2.1"
     }
 
+    signingConfigs {
+        if (hayFirmaPropia) {
+            create("propia") {
+                storeFile = file(firmaArchivo!!)
+                storePassword = System.getenv("FIRMA_CLAVE")
+                keyAlias = System.getenv("FIRMA_ALIAS")
+                keyPassword = System.getenv("FIRMA_CLAVE")
+            }
+        }
+    }
+
     buildTypes {
+        debug {
+            if (hayFirmaPropia) {
+                signingConfig = signingConfigs.getByName("propia")
+            }
+        }
         release {
             /* Sin minify a proposito. Moshi arma los adaptadores por reflexion
                sobre los nombres de las clases de datos; con R8 encogiendo, esos
@@ -25,6 +50,14 @@ android {
                de ejecucion, no de compilacion. O sea: compila, instala, y
                revienta recien cuando el vendedor intenta vender. */
             isMinifyEnabled = false
+            /* Sin esta linea assembleRelease entrega "app-release-unsigned.apk",
+               y Android lo rechaza con "el paquete no es valido" sin decir que
+               lo que falta es la firma. */
+            signingConfig = if (hayFirmaPropia) {
+                signingConfigs.getByName("propia")
+            } else {
+                signingConfigs.getByName("debug")
+            }
         }
     }
 

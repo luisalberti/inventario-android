@@ -5,6 +5,9 @@ on:
     branches: [main, master]
   workflow_dispatch:
 
+permissions:
+  contents: write        # hace falta para publicar el Release
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -20,22 +23,72 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      # Opcional. Si existen los secrets FIRMA_KEYSTORE_BASE64, FIRMA_CLAVE y
+      # FIRMA_ALIAS, todos los builds salen con la misma llave y el celular
+      # actualiza la app sin pedir desinstalar. Si no existen, se firma con la
+      # llave de prueba y el APK igual queda instalable.
+      - name: Preparar firma
+        env:
+          FIRMA_KEYSTORE_BASE64: ${{ secrets.FIRMA_KEYSTORE_BASE64 }}
+          FIRMA_CLAVE: ${{ secrets.FIRMA_CLAVE }}
+          FIRMA_ALIAS: ${{ secrets.FIRMA_ALIAS }}
+        run: |
+          if [ -n "$FIRMA_KEYSTORE_BASE64" ]; then
+            echo "$FIRMA_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/inventario.jks"
+            echo "FIRMA_ARCHIVO=$RUNNER_TEMP/inventario.jks" >> "$GITHUB_ENV"
+            echo "FIRMA_CLAVE=$FIRMA_CLAVE" >> "$GITHUB_ENV"
+            echo "FIRMA_ALIAS=$FIRMA_ALIAS" >> "$GITHUB_ENV"
+            echo "Se firma con la llave propia."
+          else
+            echo "Sin secrets de firma: se usa la llave de prueba."
+          fi
+
       - name: Build release APK
         run: gradle :app:assembleRelease --no-daemon --stacktrace
+
+      # Si aparece "app-release-unsigned.apk" el build se detiene aqui: ese
+      # archivo es justo el que el celular rechaza con "paquete no valido".
+      - name: Renombrar
+        run: |
+          ls -lh app/build/outputs/apk/release/
+          if [ ! -f app/build/outputs/apk/release/app-release.apk ]; then
+            echo "::error::No hay app-release.apk firmado. Revisa signingConfig en app/build.gradle.kts."
+            exit 1
+          fi
+          mkdir -p entrega
+          cp app/build/outputs/apk/release/app-release.apk \
+             "entrega/inventario-${{ github.run_number }}.apk"
+
+      # Diagnostico: revisa el APK con las mismas herramientas que usa Android.
+      # Si no esta firmado o esta roto, el build falla con el motivo escrito.
+      - name: Verificar el APK
+        run: |
+          BT="$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -n 1)"
+          APK="entrega/inventario-${{ github.run_number }}.apk"
+          echo "== Firma =="
+          "$BT/apksigner" verify --verbose --print-certs "$APK"
+          echo "== Paquete, version y Android minimo =="
+          "$BT/aapt2" dump badging "$APK" | grep -E "^(package|sdkVersion|targetSdkVersion)"
 
       - name: Upload APK as artifact
         uses: actions/upload-artifact@v4
         with:
           name: Inventario-APK
-          path: app/build/outputs/apk/release/*.apk
+          path: entrega/*.apk
+          if-no-files-found: error
 
+      # El Release entrega el .apk directo. El artifact de arriba siempre baja
+      # dentro de un .zip, y Android no instala un zip.
       - name: Create GitHub Release
-        if: github.event_name == 'push'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}
           name: APK build ${{ github.run_number }}
-          files: app/build/outputs/apk/release/*.apk
-          fail_on_unmatched_files: false
+          body: |
+            Bájalo desde **Assets**: es el `.apk` directo, se instala tocándolo.
+            Requiere Android 12 o más nuevo.
+          files: entrega/*.apk
+          fail_on_unmatched_files: true
+          prerelease: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
