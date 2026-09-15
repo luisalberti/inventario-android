@@ -30,6 +30,7 @@ import cl.efficientchile.inventario.data.VentaResp
 import cl.efficientchile.inventario.util.Campanita
 import cl.efficientchile.inventario.util.Formato
 import cl.efficientchile.inventario.util.LectorBoleta
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -51,10 +52,50 @@ private const val MAX_POR_LINEA = 999
  * el boton. Es la diferencia entre una pantalla que acompaña y una que se
  * adelanta y hace perder el hilo.
  */
-private enum class Paso { CARRITO, DOCUMENTO, EMPRESA, PAGO, DOCUMENTO_NUM, LISTO }
+internal enum class Paso { CARRITO, DOCUMENTO, EMPRESA, PAGO, DOCUMENTO_NUM, LISTO }
+
+/**
+ * Lo que el vendedor ya eligio y escribio en la venta en curso.
+ *
+ * Se crea en AppRoot y no dentro de SaleScreen. Al abrir la camara para la
+ * boleta, SaleScreen sale de pantalla, y todo lo que guardaba con remember se
+ * borraba: al volver preguntaba otra vez boleta o factura y la forma de pago.
+ * Tambien se perdia la lectura, y la venta se registraba como "manual"
+ * aunque el numero hubiera salido de la foto.
+ */
+class VentaEnCurso {
+    internal val paso = mutableStateOf(Paso.CARRITO)
+    val tipoDoc = mutableStateOf<String?>(null)
+    val formaPago = mutableStateOf<String?>(null)
+    val monto = mutableStateOf("")
+    val numDoc = mutableStateOf("")
+    val bancoOp = mutableStateOf("")
+    val rut = mutableStateOf("")
+    val razon = mutableStateOf("")
+    val direccion = mutableStateOf("")
+    val giro = mutableStateOf("")
+    /** La lectura de boleta que relleno el formulario. Va al servidor como origen "ocr". */
+    val lectura = mutableStateOf<LectorBoleta.Lectura?>(null)
+
+    /** Deja la venta en blanco: al confirmar, cancelar o vaciar el carrito. */
+    fun reiniciar() {
+        paso.value = Paso.CARRITO
+        tipoDoc.value = null
+        formaPago.value = null
+        monto.value = ""
+        numDoc.value = ""
+        bancoOp.value = ""
+        rut.value = ""
+        razon.value = ""
+        direccion.value = ""
+        giro.value = ""
+        lectura.value = null
+    }
+}
 
 @Composable
 fun SaleScreen(
+    venta: VentaEnCurso,
     repo: Repo,
     baseUrl: String,
     token: String,
@@ -76,22 +117,23 @@ fun SaleScreen(
     val iva = Dinero.iva(total)
     val unidades = carrito.sumOf { it.cantidad }
 
-    var paso by remember { mutableStateOf(Paso.CARRITO) }
-    var tipoDoc by remember { mutableStateOf<String?>(null) }
-    var formaPago by remember { mutableStateOf<String?>(null) }
-    var monto by remember { mutableStateOf("") }
-    var numDoc by remember { mutableStateOf("") }
-    var bancoOp by remember { mutableStateOf("") }
-    var rut by remember { mutableStateOf("") }
-    var razon by remember { mutableStateOf("") }
-    var direccion by remember { mutableStateOf("") }
-    var giro by remember { mutableStateOf("") }
+    var paso by venta.paso
+    var tipoDoc by venta.tipoDoc
+    var formaPago by venta.formaPago
+    var monto by venta.monto
+    var numDoc by venta.numDoc
+    var bancoOp by venta.bancoOp
+    var rut by venta.rut
+    var razon by venta.razon
+    var direccion by venta.direccion
+    var giro by venta.giro
 
     var enviando by remember { mutableStateOf(false) }
     var estado by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
     var exito by remember { mutableStateOf<VentaResp?>(null) }
     val scope = rememberCoroutineScope()
+    val scroll = rememberScrollState()
 
     /* Lo que leyo la camara entra a los campos una sola vez, y solo donde
        todavia no hay nada escrito: si el vendedor ya corrigio el numero a
@@ -100,7 +142,18 @@ fun SaleScreen(
         val l = lecturaBoleta ?: return@LaunchedEffect
         if (numDoc.isBlank()) l.numero?.let { numDoc = Formato.documento(it) }
         if (rut.isBlank()) l.rut?.let { rut = Formato.rut(it) }
+        venta.lectura.value = l
         onLecturaUsada()
+    }
+
+    /* Lo nuevo aparece abajo, asi que la pantalla baja sola hasta ahi. Antes
+       el paso siguiente se abria fuera de la vista y habia que adivinar que
+       tocaba deslizar. Se espera lo que dura la animacion de Revelado, si no
+       se baja hasta donde la seccion todavia no mide su alto final. */
+    LaunchedEffect(paso, tipoDoc, formaPago) {
+        if (paso == Paso.CARRITO) return@LaunchedEffect
+        delay(350)
+        scroll.animateScrollTo(scroll.maxValue)
     }
 
     exito?.let { v ->
@@ -156,7 +209,13 @@ fun SaleScreen(
         },
         bottomBar = {
             Surface(shadowElevation = 8.dp, color = Blanco) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                /* navigationBarsPadding: la app dibuja de borde a borde
+                   (enableEdgeToEdge) y sin esto "Volver atrás" quedaba debajo
+                   de los botones de navegacion de Android. */
+                Column(
+                    Modifier.navigationBarsPadding().padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
                     if (paso != Paso.LISTO) {
                         Row(
                             Modifier.fillMaxWidth(),
@@ -206,7 +265,7 @@ fun SaleScreen(
                                     enviar(
                                         scope, repo, baseUrl, token, carrito, tipoDoc!!,
                                         formaPago!!, monto, numDoc, bancoOp, rut, razon,
-                                        direccion, giro, comprobante, lecturaBoleta,
+                                        direccion, giro, comprobante, venta.lectura.value,
                                         onEstado = { estado = it },
                                         onEnviando = { enviando = it },
                                         onError = { error = it },
@@ -241,7 +300,7 @@ fun SaleScreen(
         },
     ) { pad ->
         Column(
-            Modifier.padding(pad).fillMaxSize().verticalScroll(rememberScrollState())
+            Modifier.padding(pad).fillMaxSize().verticalScroll(scroll)
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {

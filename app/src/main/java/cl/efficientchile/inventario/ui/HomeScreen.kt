@@ -42,7 +42,9 @@ fun HomeScreen(
         },
         bottomBar = {
             Surface(tonalElevation = 4.dp) {
-                Column(Modifier.padding(16.dp)) {
+                // navigationBarsPadding: con enableEdgeToEdge la app dibuja
+                // debajo de los botones de Android y esto quedaba tapado.
+                Column(Modifier.navigationBarsPadding().padding(16.dp)) {
                     Text(
                         "Empleado: ${username ?: "-"}",
                         style = MaterialTheme.typography.bodySmall,

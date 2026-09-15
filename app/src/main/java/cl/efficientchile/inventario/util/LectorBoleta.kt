@@ -24,24 +24,29 @@ import kotlin.math.roundToInt
  * venian una con el total emborronado, una con un digito comido por la
  * arruga, y una con dos copias impresas en la misma tira.
  *
- * ## Neto, IVA y total se confirman con la cuenta
+ * ## Neto, IVA y total: primero lo declarado, despues la formula
  *
- * En el papel, NETO / IVA / TOTAL suelen ir en columna abajo a la derecha, y
- * los montos casi nunca quedan exactamente a la altura de su etiqueta. Por eso
- * una etiqueta no se casa solo con el monto de su misma linea: tambien con los
- * de la linea de arriba y la de abajo. Y ningun trio se acepta porque "estaba
- * al lado": se acepta si cumple la cuenta
+ * 1. Se busca lo que el papel DECLARA: neto (o "monto venta", "compra"),
+ *    IVA (tambien "IVA incluido en este pago") y total (o "precio"). El monto
+ *    de cada etiqueta es el que la sigue en su linea, prefiriendo el que lleva
+ *    $; si la linea no trae monto, el de la linea de arriba o de abajo, porque
+ *    en el papel los montos casi nunca quedan a la altura exacta.
+ * 2. Si los tres estan y cumplen la cuenta, se usan tal cual.
+ * 3. Si dos cumplen la cuenta entre si, el tercero sale de ellos.
+ * 4. Si solo sirve uno, el resto sale por formula:
+ *      solo total -> neto = total / 1,19   IVA = total - neto
+ *      solo neto  -> IVA = neto x 19%       total = neto + IVA
+ *      solo IVA   -> neto = IVA / 0,19      total = neto + IVA
+ *    El total manda sobre los otros dos: es lo que se cobro.
+ * 5. Si no hay ninguna etiqueta, se busca entre todos los montos del papel un
+ *    trio que cumpla la cuenta.
  *
- *     IVA   = 19% del neto
- *     TOTAL = neto + IVA
- *
- * Si ninguna combinacion de etiquetas cuadra, se busca el trio entre todos los
- * montos del papel. Solo si eso tambien falla se usan los montos sin
- * confirmar, y se avisa.
+ * La cuenta, siempre:  IVA = 19% del neto   y   TOTAL = neto + IVA.
  */
 object LectorBoleta {
 
     private const val TASA_IVA = 0.19
+    private const val FACTOR_TOTAL = 1.19
 
     data class Lectura(
         val total: Int? = null,
@@ -55,12 +60,19 @@ object LectorBoleta {
         val avisos: List<String> = emptyList(),
         /** Lo que entrego el OCR, ordenado por filas. Para diagnosticar. */
         val textoLeido: String = "",
+        /** Cuales de "total", "neto" e "iva" no venian en el papel y se calcularon. */
+        val calculados: Set<String> = emptySet(),
     ) {
         /** Si no hay total, no hay nada que precargar. */
         val sirve: Boolean get() = total != null
     }
 
-    private const val MONTO = """\$?\s*(\d{1,3}(?:[.,]\d{3})+|\d+)"""
+    /* Letras que el OCR confunde dentro de las etiquetas: la O con el cero en
+       TOTAL y NETO, la I con la L o el 1 en IVA. Tambien "I.V.A." con puntos. */
+    private const val ET_TOTAL = """T[O0]TA[LI1]"""
+    private const val ET_NETO = """NET[O0]"""
+    private const val ET_IVA = """(?<![A-Z])[I1L]\.?\s?V\.?\s?A\.?(?![A-Z])"""
+
     // Un numero de documento puede traer puntos de miles: "N 303.747".
     private const val NUMERO = """(\d{1,3}(?:\.\d{3})+|\d{1,12})"""
 
@@ -69,9 +81,11 @@ object LectorBoleta {
        encontraron las boletas reales: en la de Astro Supermarket, la linea
        "El IVA de la Boleta $429" hacia que el folio quedara en 429. */
     private val RE_PLATA = Regex(
-        """\bTOTAL\b|\bIVA\b|\bNETO\b|\bMONTO\b|\bSUBTOTAL\b|\bCOMPRA\b|\bIMPORTE\b|\bPRECIO\b""")
+        """\b$ET_TOTAL\b|$ET_IVA|\b$ET_NETO\b|\bMONTO\b|\bSUBTOTAL\b|\bCOMPRA\b|\bIMPORTE\b|\bPRECIO\b""")
 
-    private val RE_MONTO = Regex(MONTO)
+    /* Un monto: "$3.990", "$ 3.990", "3.990" o "S3.990" (el OCR lee el $ como
+       S). El grupo 1 dice si venia con signo; el 2 es el numero. */
+    private val RE_MONTO = Regex("""(\$|S(?=\s?\d))?\s*(\d{1,3}(?:[.,]\d{3})+|\d+)""")
     private val RE_RUT = Regex("""\b(\d{1,2}\.\d{3}\.\d{3}-[\dK])\b""")
     private val RE_RUT_EN_LINEA = Regex("""\d{1,2}\.\d{3}\.\d{3}-[\dK]""")
     private val RE_FECHA = Regex("""\b(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})\b""")
@@ -101,7 +115,7 @@ object LectorBoleta {
     // Un solo asterisco basta: GetNet imprime "*4273" y Transbank "****4273".
     private val RE_TARJETA = Regex("""[*X]+\s*(\d{4})\b""")
     private val RE_TARJETA_LIMPIAR = Regex("""\*+\s*\d{4}\b""")
-    private val RE_SIN_IVA = Regex("""SIN IVA|EXENT""")
+    private val RE_SIN_IVA = Regex("""SIN $ET_IVA|EXENT""")
     // "IVA 19%" y "19% IVA": ese 19 es la tasa, no plata.
     private val RE_PORCENTAJE = Regex("""\d{1,2}(?:[.,]\d+)?\s*%""")
     // El OCR lee el cero como letra O: "$1O.4O4".
@@ -111,7 +125,7 @@ object LectorBoleta {
 
        "TOTAL NETO" y "TOTAL IVA" NO son el total. La boleta de Los Cisnes
        imprime las tres lineas en ese orden, y quedarse con la primera daba
-       $834 como total de una compra de $2.182.
+       $834 como total de una compra de $2.182. "SUB TOTAL" tampoco.
 
        "MONTO VENTA" en un voucher Transbank es el NETO, no el total; en un
        voucher GetNet, "Monto" a secas es el total. Por eso se distinguen.
@@ -119,17 +133,18 @@ object LectorBoleta {
        "PRECIO" tambien marca el total en algunas boletas, pero no en el
        encabezado "PRECIO UNITARIO" de la lista de articulos. */
     private val PATRONES_TOTAL = listOf(
-        Regex("""\bTOTAL\b(?!\s*:?\s*(?:NETO|IVA|AFECTO|EXENTO))"""),
-        Regex("""\bVALOR TOTAL\b|\bIMPORTE\b|\bA PAGAR\b"""),
-        Regex("""\bMONTO\b(?!\s*:?\s*(?:VENTA|NETO|AFECTO|EXENTO))"""),
+        Regex("""(?<!SUB\s?)\b$ET_TOTAL\b(?!\s*:?\s*(?:$ET_NETO|[I1L]\.?\s?V\.?\s?A|AFECTO|EXENTO))"""),
+        Regex("""\bVALOR $ET_TOTAL\b|\bIMPORTE\b|\bA PAGAR\b"""),
+        Regex("""\bMONTO\b(?!\s*:?\s*(?:VENTA|$ET_NETO|AFECTO|EXENTO))"""),
         Regex("""\bPRECIO\b(?!\s*(?:UNIT|U\b|X\b))"""),
     )
     private val PATRONES_NETO = listOf(
-        Regex("""\bNETO\b|\bAFECTO\b"""),
-        Regex("""\bMONTO VENTA\b|\bSUB\s?TOTAL\b"""),
+        Regex("""\b$ET_NETO\b|\bAFECTO\b"""),
+        Regex("""\bMONTO\s?VENTA\b|\bSUB\s?$ET_TOTAL\b"""),
         Regex("""\bCOMPRA\b(?!\s*AFECTA)"""),
     )
-    private val PATRONES_IVA = listOf(Regex("""\bIVA\b"""))
+    // "IVA: $637", "IVA 19% $479", "IVA incluido en este pago: $1.533".
+    private val PATRONES_IVA = listOf(Regex(ET_IVA))
 
     /* El orden es la prioridad. Si el papel trae folio de boleta Y codigo de
        autorizacion, el que el vendedor quiere anotar es el de la boleta. */
@@ -160,61 +175,95 @@ object LectorBoleta {
             .filter { it.isNotEmpty() }
             .toList()
 
+    // ================================================================ montos
+
+    private class Monto(val valor: Int, val conSigno: Boolean)
+
     /**
-     * Todos los montos de la linea, del ULTIMO al primero.
-     *
-     * El ultimo va primero porque en "19% IVA: 3.051" la plata viene al final.
-     * Antes de buscar se borran las cosas que parecen montos y no lo son:
-     * porcentajes, RUT, fechas, horas y los 4 digitos de la tarjeta.
+     * Borra lo que parece monto y no lo es: porcentajes, RUT, fechas, horas y
+     * los 4 digitos de la tarjeta. Y arregla el cero leido como O.
      */
-    private fun montos(linea: String): List<Int> {
-        var limpia = RE_O_POR_CERO.replace(linea, "0")
+    private fun limpiar(texto: String): String {
+        var s = RE_O_POR_CERO.replace(texto, "0")
         for (re in listOf(RE_PORCENTAJE, RE_RUT_EN_LINEA, RE_FECHA, RE_FECHA_ISO,
                 RE_HORA, RE_TARJETA_LIMPIAR)) {
-            limpia = re.replace(limpia, " ")
+            s = re.replace(s, " ")
         }
-        // En pesos chilenos no hay decimales: un punto o una coma dentro de un
-        // monto siempre es separador de miles.
-        return RE_MONTO.findAll(limpia)
-            .mapNotNull { it.groupValues[1].replace(".", "").replace(",", "").toIntOrNull() }
-            .filter { it > 0 }
+        return s
+    }
+
+    /** Los montos de un texto, en el orden en que aparecen. */
+    private fun montosEn(texto: String): List<Monto> =
+        RE_MONTO.findAll(limpiar(texto))
+            .mapNotNull { m ->
+                // En pesos chilenos no hay decimales: un punto o una coma dentro
+                // de un monto siempre es separador de miles.
+                val v = m.groupValues[2].replace(".", "").replace(",", "").toIntOrNull()
+                if (v == null || v <= 0) null else Monto(v, m.groupValues[1].isNotEmpty())
+            }
             .toList()
-            .asReversed()
+
+    /** Todos los montos de la linea, del ultimo al primero. */
+    private fun montos(linea: String): List<Int> = montosEn(linea).map { it.valor }.asReversed()
+
+    /**
+     * Los montos que acompañan a una etiqueta dentro de su linea, en orden de
+     * preferencia: primero los que la SIGUEN y llevan $, despues los que la
+     * siguen sin $, y al final los que estan antes de la etiqueta.
+     *
+     * "IVA incluido en este pago: $1.533" -> 1.533.
+     * "19% IVA: 3.051" -> 3.051 (el 19% se borra antes).
+     * "TOTAL IVA 19 $ 348" -> 348 primero, el 19 despues (y se descarta).
+     */
+    private fun montosJuntoA(linea: String, etiqueta: MatchResult): List<Int> {
+        val despues = montosEn(linea.substring(etiqueta.range.last + 1))
+        val antes = montosEn(linea.substring(0, etiqueta.range.first)).asReversed()
+        return (despues.filter { it.conSigno } + despues.filterNot { it.conSigno } + antes)
+            .map { it.valor }
     }
 
     /**
-     * Montos que podrian ir con una etiqueta, en orden de preferencia.
+     * Montos que el papel declara para una etiqueta, en orden de preferencia.
      *
      * Primero los de la misma linea. Si la linea de la etiqueta no trae monto
      * (la columna de montos quedo un poco mas arriba o mas abajo), se toman
      * los de la linea siguiente y la anterior. La cuenta decide despues cual
      * era.
      */
-    private fun candidatos(lineas: List<String>, patrones: List<Regex>, esIva: Boolean): List<Int> {
+    private fun declarados(lineas: List<String>, patrones: List<Regex>, esIva: Boolean): List<Int> {
+        // Un 19 suelto junto a "IVA" es la tasa, no el impuesto.
+        fun sirve(v: Int) = !(esIva && v == 19)
+
         val out = LinkedHashSet<Int>()
         for (re in patrones) {
             val vecinos = mutableListOf<Int>()
             for ((k, l) in lineas.withIndex()) {
-                if (!re.containsMatchIn(l)) continue
+                val m = re.find(l) ?: continue
                 if (esIva && RE_SIN_IVA.containsMatchIn(l)) continue
-                val propios = montos(l)
+                val propios = montosJuntoA(l, m).filter { sirve(it) }
                 if (propios.isNotEmpty()) {
                     out += propios
                 } else {
-                    lineas.getOrNull(k + 1)?.let { vecinos += montos(it) }
-                    lineas.getOrNull(k - 1)?.let { vecinos += montos(it) }
+                    for (vecina in listOfNotNull(lineas.getOrNull(k + 1), lineas.getOrNull(k - 1))) {
+                        vecinos += montosEn(vecina)
+                            .sortedByDescending { it.conSigno }
+                            .map { it.valor }
+                            .filter { sirve(it) }
+                    }
                 }
             }
             out += vecinos
         }
-        // Un 19 suelto junto a "IVA" es la tasa, no el impuesto.
-        return out.filter { !(esIva && it == 19) }
+        return out.toList()
     }
 
-    private fun ivaDe(neto: Int): Int = (neto * TASA_IVA).roundToInt()
+    private fun ivaDesdeNeto(neto: Int): Int = (neto * TASA_IVA).roundToInt()
+    private fun netoDesdeTotal(total: Int): Int = (total / FACTOR_TOTAL).roundToInt()
+    private fun netoDesdeIva(iva: Int): Int = (iva / TASA_IVA).roundToInt()
 
     /**
-     * La cuenta que tiene que cumplir cualquier boleta chilena afecta.
+     * La cuenta que tiene que cumplir cualquier boleta chilena afecta:
+     * IVA = 19% del neto, y total = neto + IVA.
      *
      * Se aceptan 2 pesos de diferencia por redondeo, o un 0,2% del neto en
      * facturas grandes, donde cada linea redondea su propio IVA.
@@ -222,37 +271,32 @@ object LectorBoleta {
     private fun cuadra(neto: Int, iva: Int, total: Int): Boolean =
         neto > 0 && iva > 0 &&
             abs(neto + iva - total) <= 2 &&
-            abs(iva - ivaDe(neto)) <= maxOf(2, neto / 500)
+            abs(iva - ivaDesdeNeto(neto)) <= maxOf(2, neto / 500)
 
-    private data class Montos(
+    private class Montos(
         val total: Int?,
         val neto: Int?,
         val iva: Int?,
+        val calculados: Set<String>,
         val avisos: List<String>,
     )
 
     /**
      * Busca entre TODOS los montos del papel un trio que cumpla la cuenta.
-     * Se prefiere el trio cuyo total tambien aparecio junto a una etiqueta de
-     * total; entre iguales, el de total mas grande.
+     * Solo se usa cuando ninguna etiqueta dio un monto.
      */
-    private fun trioPorCuenta(todos: Set<Int>, totalesRotulados: List<Int>): Triple<Int, Int, Int>? {
+    private fun trioPorCuenta(todos: Set<Int>): Triple<Int, Int, Int>? {
         val lista = todos.filter { it >= 10 }
         var mejor: Triple<Int, Int, Int>? = null
         for (n in lista) {
-            val esperado = ivaDe(n)
+            val esperado = ivaDesdeNeto(n)
             val tolerancia = maxOf(2, n / 500)
             for (i in lista) {
                 if (abs(i - esperado) > tolerancia) continue
                 for (t in lista) {
                     if (!cuadra(n, i, t)) continue
                     val m = mejor
-                    val rotulado = t in totalesRotulados
-                    val mRotulado = m != null && m.third in totalesRotulados
-                    if (m == null || (rotulado && !mRotulado) ||
-                        (rotulado == mRotulado && t > m.third)) {
-                        mejor = Triple(n, i, t)
-                    }
+                    if (m == null || t > m.third) mejor = Triple(n, i, t)
                 }
             }
         }
@@ -260,63 +304,75 @@ object LectorBoleta {
     }
 
     private fun resolverMontos(
-        cT: List<Int>, cN: List<Int>, cI: List<Int>, todos: Set<Int>,
+        dT: List<Int>, dN: List<Int>, dI: List<Int>, todos: Set<Int>,
     ): Montos {
-        // 1. Las tres etiquetas encontradas y la cuenta cuadra.
-        for (t in cT) for (n in cN) for (i in cI) {
-            if (cuadra(n, i, t)) return Montos(t, n, i, emptyList())
+        // ---- 1. Los tres declarados y la cuenta cuadra: se usan tal cual.
+        for (t in dT) for (n in dN) for (i in dI) {
+            if (cuadra(n, i, t)) return Montos(t, n, i, emptySet(), emptyList())
         }
 
-        // 2. Dos etiquetas que cuadran; la tercera se calcula.
-        for (t in cT) for (i in cI) {
+        // ---- 2. Dos declarados que cuadran entre si: el tercero sale de ellos.
+        for (t in dT) for (i in dI) {
             val n = t - i
             if (cuadra(n, i, t)) {
-                val aviso = if (cN.isEmpty()) "Neto calculado como total menos IVA."
-                else "El neto se leyó mal (${cN.first()}). Se usó total menos IVA."
-                return Montos(t, n, i, listOf(aviso))
+                val aviso = if (dN.isEmpty()) "Neto calculado: total − IVA."
+                else "El neto leído (${dN.first()}) no cuadraba. Neto calculado: total − IVA."
+                return Montos(t, n, i, setOf("neto"), listOf(aviso))
             }
         }
-        for (t in cT) for (n in cN) {
+        for (t in dT) for (n in dN) {
             val i = t - n
             if (cuadra(n, i, t)) {
-                val aviso = if (cI.isEmpty()) "IVA calculado como total menos neto."
-                else "El IVA se leyó mal (${cI.first()}). Se usó total menos neto."
-                return Montos(t, n, i, listOf(aviso))
+                val aviso = if (dI.isEmpty()) "IVA calculado: total − neto."
+                else "El IVA leído (${dI.first()}) no cuadraba. IVA calculado: total − neto."
+                return Montos(t, n, i, setOf("iva"), listOf(aviso))
             }
         }
         /* El total emborronado: el voucher de Electronica Segovia se lee
            "TOTAL: $21." porque el resto quedo tapado por una mancha. Si neto
            e IVA cuadran entre si, manda neto + IVA. */
-        for (n in cN) for (i in cI) {
+        for (n in dN) for (i in dI) {
             if (cuadra(n, i, n + i)) {
-                val aviso = if (cT.isEmpty()) "Total calculado desde neto + IVA."
-                else "El total se leyó mal (${cT.first()}). Se usó neto + IVA."
-                return Montos(n + i, n, i, listOf(aviso))
+                val aviso = if (dT.isEmpty()) "Total calculado: neto + IVA."
+                else "El total leído (${dT.first()}) no cuadraba. Total calculado: neto + IVA."
+                return Montos(n + i, n, i, setOf("total"), listOf(aviso))
             }
         }
 
-        // 3. Ninguna etiqueta sirvio: el trio se busca solo por la cuenta.
-        trioPorCuenta(todos, cT)?.let { (n, i, t) ->
-            return Montos(t, n, i, listOf(
+        // ---- 3. Un solo dato declarado sirve: el resto sale por formula.
+        //         El total manda: es lo que efectivamente se cobro.
+        dT.firstOrNull()?.let { t ->
+            val n = netoDesdeTotal(t)
+            val i = t - n
+            val avisos = mutableListOf("Neto e IVA calculados desde el total (neto = total ÷ 1,19).")
+            if (dI.isNotEmpty()) avisos += "El IVA leído (${dI.first()}) no cuadraba con el total."
+            if (dN.isNotEmpty()) avisos += "El neto leído (${dN.first()}) no cuadraba con el total."
+            return Montos(t, n, i, setOf("neto", "iva"), avisos)
+        }
+        dN.firstOrNull()?.let { n ->
+            val i = ivaDesdeNeto(n)
+            val avisos = mutableListOf("IVA y total calculados desde el neto (IVA = neto × 19%).")
+            if (dI.isNotEmpty()) avisos += "El IVA leído (${dI.first()}) no cuadraba con el neto."
+            return Montos(n + i, n, i, setOf("iva", "total"), avisos)
+        }
+        dI.firstOrNull()?.let { i ->
+            val n = netoDesdeIva(i)
+            return Montos(n + i, n, i, setOf("neto", "total"), listOf(
+                "Solo se leyó el IVA. Neto y total calculados desde él (neto = IVA ÷ 0,19): " +
+                    "revisa el total."))
+        }
+
+        // ---- 4. Ninguna etiqueta dio un monto: el trio se busca por la cuenta.
+        trioPorCuenta(todos)?.let { (n, i, t) ->
+            return Montos(t, n, i, emptySet(), listOf(
                 "Neto, IVA y total se reconocieron por la cuenta (neto + 19% = total), " +
                     "no por su etiqueta. Revísalos."))
         }
 
-        // 4. Nada cuadra. Se usa lo que haya y se avisa.
-        val t = cT.firstOrNull()
-        val n = cN.firstOrNull()
-        val i = cI.firstOrNull()
-        return when {
-            t != null && n == null && i == null -> {
-                // En Chile el precio va con IVA incluido, asi que se derivan.
-                val nn = (t / (1 + TASA_IVA)).roundToInt()
-                Montos(t, nn, t - nn, listOf("Neto e IVA calculados desde el total."))
-            }
-            t != null -> Montos(t, n, i, listOf(
-                "El neto y el IVA no cuadran con el total (neto + 19% = total). Revisa los tres."))
-            else -> Montos(null, n, i, emptyList())
-        }
+        return Montos(null, null, null, emptySet(), emptyList())
     }
+
+    // ================================================================ numero
 
     private fun buscarNumero(L: List<String>): String? {
         val candidatos = mutableListOf<String>()
@@ -334,6 +390,8 @@ object LectorBoleta {
            igual, porque hay boletas con folio de dos cifras. */
         return candidatos.firstOrNull { it.length >= 3 } ?: candidatos.firstOrNull()
     }
+
+    // ========================================================= fecha y hora
 
     /** Arregla lo que el OCR le hace a fechas y horas antes de buscarlas. */
     private fun prepararFechaHora(linea: String): String {
@@ -414,6 +472,8 @@ object LectorBoleta {
         return fecha to hora
     }
 
+    // ================================================================ lectura
+
     /**
      * @param texto el texto del OCR tal como lo entrega, agrupado por bloques.
      *   Con este se busca el numero, que ya se leia bien asi.
@@ -428,13 +488,21 @@ object LectorBoleta {
         val fuentes = if (F == L) listOf(F) else listOf(F, L)
 
         // ------------------------------------------------------------ montos
-        val cT = fuentes.flatMap { candidatos(it, PATRONES_TOTAL, esIva = false) }.distinct()
-        val cN = fuentes.flatMap { candidatos(it, PATRONES_NETO, esIva = false) }.distinct()
-        val cI = fuentes.flatMap { candidatos(it, PATRONES_IVA, esIva = true) }.distinct()
+        val dT = fuentes.flatMap { declarados(it, PATRONES_TOTAL, esIva = false) }.distinct()
+        val dN = fuentes.flatMap { declarados(it, PATRONES_NETO, esIva = false) }.distinct()
+        val dI = fuentes.flatMap { declarados(it, PATRONES_IVA, esIva = true) }.distinct()
         val todos = fuentes.flatMap { lineas -> lineas.flatMap { montos(it) } }.toSet()
 
-        val m = resolverMontos(cT, cN, cI, todos)
+        val m = resolverMontos(dT, dN, dI, todos)
         avisos += m.avisos
+
+        // Control final: lo que sale de aca SIEMPRE cumple neto + IVA = total.
+        val t = m.total
+        val n = m.neto
+        val i = m.iva
+        if (t != null && n != null && i != null && abs(n + i - t) > 2) {
+            avisos += "Neto + IVA no da el total. Revisa los tres."
+        }
 
         // ------------------------------------------- numero de documento
         val numero = buscarNumero(L) ?: buscarNumero(F)
@@ -459,6 +527,7 @@ object LectorBoleta {
             ultimos4 = u4,
             avisos = avisos,
             textoLeido = textoPorFilas,
+            calculados = m.calculados,
         )
     }
 }

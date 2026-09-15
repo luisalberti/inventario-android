@@ -84,6 +84,32 @@ fun OcrScreen(
                 },
             )
         },
+        bottomBar = {
+            /* Los botones de la confirmacion van fijos abajo y no al final
+               del scroll: asi se ven siempre, sin tener que adivinar que hay
+               que deslizar. navigationBarsPadding los deja por encima de los
+               botones de navegacion de Android. */
+            val leida = lectura
+            if (leida != null) {
+                Surface(shadowElevation = 8.dp, color = Blanco) {
+                    Column(
+                        Modifier.navigationBarsPadding().padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Button(
+                            onClick = { archivo?.let { onListo(leida, it) } },
+                            modifier = Modifier.fillMaxWidth().height(56.dp),
+                        ) { Text("Usar estos datos", style = MaterialTheme.typography.labelLarge) }
+                        OutlinedButton(
+                            onClick = {
+                                lectura = null; archivo?.delete(); archivo = null; verTexto = false
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text("Repetir la foto") }
+                    }
+                }
+            }
+        },
     ) { pad ->
         val L = lectura
         if (L == null) {
@@ -214,14 +240,16 @@ fun OcrScreen(
                     }
                 }
 
-                Fila("Número", L.numero ?: "no se encontró", L.numero == null)
+                Fila("Número", L.numero ?: "no se encontró", falta = L.numero == null)
                 Fila("Total", L.total?.let { Dinero.clp(it.toDouble()) } ?: "no se encontró",
-                    L.total == null)
-                Fila("Neto", L.neto?.let { Dinero.clp(it.toDouble()) } ?: "—", false)
-                Fila("IVA", L.iva?.let { Dinero.clp(it.toDouble()) } ?: "—", false)
-                if (L.fecha != null) Fila("Fecha", "${L.fecha} ${L.hora ?: ""}".trim(), false)
-                if (L.rut != null) Fila("RUT", L.rut, false)
-                if (L.ultimos4 != null) Fila("Tarjeta", "•••• ${L.ultimos4}", false)
+                    falta = L.total == null, calculado = "total" in L.calculados)
+                Fila("Neto", L.neto?.let { Dinero.clp(it.toDouble()) } ?: "—",
+                    calculado = "neto" in L.calculados)
+                Fila("IVA", L.iva?.let { Dinero.clp(it.toDouble()) } ?: "—",
+                    calculado = "iva" in L.calculados)
+                if (L.fecha != null) Fila("Fecha", "${L.fecha} ${L.hora ?: ""}".trim())
+                if (L.rut != null) Fila("RUT", L.rut)
+                if (L.ultimos4 != null) Fila("Tarjeta", "•••• ${L.ultimos4}")
 
                 L.avisos.forEach {
                     Text("· $it", style = MaterialTheme.typography.bodySmall, color = TintaSuave)
@@ -233,18 +261,6 @@ fun OcrScreen(
                     style = MaterialTheme.typography.bodySmall,
                     color = TintaSuave,
                 )
-
-                Spacer(Modifier.height(4.dp))
-                Button(
-                    onClick = { archivo?.let { onListo(L, it) } },
-                    modifier = Modifier.fillMaxWidth().height(56.dp),
-                ) { Text("Usar estos datos", style = MaterialTheme.typography.labelLarge) }
-                OutlinedButton(
-                    onClick = {
-                        lectura = null; archivo?.delete(); archivo = null; verTexto = false
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                ) { Text("Repetir la foto") }
 
                 /* Diagnostico. Cuando un monto no sale, lo primero es ver que
                    leyo el telefono: si el numero no esta en este texto, el
@@ -277,19 +293,34 @@ fun OcrScreen(
     }
 }
 
+/**
+ * Una fila etiqueta / valor. Si el valor no venia en el papel y se calculo
+ * con la formula, lo dice debajo en chico: el vendedor tiene que saber que
+ * numero leyo la camara y cual puso la cuenta.
+ */
 @Composable
-private fun Fila(etiqueta: String, valor: String?, falta: Boolean) {
+private fun Fila(
+    etiqueta: String,
+    valor: String?,
+    falta: Boolean = false,
+    calculado: Boolean = false,
+) {
     Row(
         Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(etiqueta, color = TintaSuave)
-        Text(
-            valor ?: "—",
-            fontWeight = FontWeight.SemiBold,
-            color = if (falta) MaterialTheme.colorScheme.error else Tinta,
-        )
+        Column(horizontalAlignment = Alignment.End) {
+            Text(
+                valor ?: "—",
+                fontWeight = FontWeight.SemiBold,
+                color = if (falta) MaterialTheme.colorScheme.error else Tinta,
+            )
+            if (calculado) {
+                Text("calculado", style = MaterialTheme.typography.bodySmall, color = TintaSuave)
+            }
+        }
     }
 }
 

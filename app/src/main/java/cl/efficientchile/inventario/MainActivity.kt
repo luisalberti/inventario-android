@@ -18,6 +18,7 @@ import cl.efficientchile.inventario.ui.SaleScreen
 import cl.efficientchile.inventario.ui.ScannerScreen
 import cl.efficientchile.inventario.ui.SetupScreen
 import cl.efficientchile.inventario.ui.TemaInventario
+import cl.efficientchile.inventario.ui.VentaEnCurso
 import cl.efficientchile.inventario.util.LectorBoleta
 import java.io.File
 
@@ -62,6 +63,11 @@ fun AppRoot() {
     // Lo ultimo que leyo la camara de una boleta, esperando que el
     // formulario lo consuma. Se limpia apenas se usa.
     var lecturaBoleta by remember { mutableStateOf<LectorBoleta.Lectura?>(null) }
+    /* Lo que el vendedor ya eligio en la venta (paso, boleta o factura, forma
+       de pago, numero...). Vive aca y no dentro de SaleScreen: al abrir la
+       camara, SaleScreen sale de pantalla y perdia todo, y al volver
+       preguntaba otra vez si era boleta o factura. */
+    val venta = remember { VentaEnCurso() }
 
     fun limpiarComprobante() {
         comprobante?.delete()
@@ -85,7 +91,11 @@ fun AppRoot() {
             carrito = carrito,
             onEscanear = { pantalla = Screen.Scanner },
             onVer = { pantalla = Screen.Sale },
-            onVaciar = { carrito.clear(); limpiarComprobante() },
+            onVaciar = {
+                carrito.clear()
+                limpiarComprobante()
+                venta.reiniciar()
+            },
             onConfig = { pantalla = Screen.Setup },
         )
 
@@ -127,6 +137,7 @@ fun AppRoot() {
         )
 
         Screen.Sale -> SaleScreen(
+            venta = venta,
             repo = repo,
             baseUrl = baseUrl.orEmpty(),
             token = token.orEmpty(),
@@ -155,9 +166,13 @@ fun AppRoot() {
                 carrito.clear()
                 limpiarComprobante()
                 lecturaBoleta = null
+                venta.reiniciar()
                 pantalla = Screen.Home
             },
-            onCancelar = { pantalla = Screen.Home },
+            onCancelar = {
+                venta.reiniciar()
+                pantalla = Screen.Home
+            },
         )
 
         Screen.Comprobante -> ComprobanteScreen(
