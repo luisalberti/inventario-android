@@ -62,6 +62,8 @@ object LectorBoleta {
         val textoLeido: String = "",
         /** Cuales de "total", "neto" e "iva" no venian en el papel y se calcularon. */
         val calculados: Set<String> = emptySet(),
+        /** La empresa que emitio el papel, tal como viene impresa arriba. */
+        val emisor: String? = null,
     ) {
         /** Si no hay total, no hay nada que precargar. */
         val sirve: Boolean get() = total != null
@@ -146,22 +148,63 @@ object LectorBoleta {
     // "IVA: $637", "IVA 19% $479", "IVA incluido en este pago: $1.533".
     private val PATRONES_IVA = listOf(Regex(ET_IVA))
 
-    /* El orden es la prioridad. Si el papel trae folio de boleta Y codigo de
-       autorizacion, el que el vendedor quiere anotar es el de la boleta. */
+    /* Etiquetas del numero de documento, en orden de prioridad.
+
+       En un voucher, el numero que se anota es el de OPERACION (Transbank) o
+       el de COMPROBANTE (GetNet). La AUTORIZACION y la APROBACION van al
+       final: el papel las trae en la misma linea y antes se colaban como
+       numero de la venta. En una boleta o factura del SII es el folio:
+       "N 17261", "Nro 36325", "N° 303.747".
+
+       `fuerte`: la etiqueta es inequivoca. Su numero tiene que venir pegado
+       (solo ":" o "N°" de por medio), y si no esta en su linea se busca en la
+       de abajo o la de arriba, porque en el papel el numero puede quedar
+       corrido una fila. Las debiles (BOLETA, FACTURA, la N suelta) solo miran
+       su propia linea: la de abajo casi siempre es un RUT o una fecha. */
+    private class EtiquetaNumero(val re: Regex, val fuerte: Boolean)
+
     private val ETIQUETAS = listOf(
-        """\bBOLETA\b""",
-        """\bFOLIO\b""",
-        // La N suelta: "N 1234", "N° 303.747", "Nro 36325", "NRO OPERACION".
+        EtiquetaNumero(Regex("""\b[O0]PERACI[O0]N\b"""), fuerte = true),
+        EtiquetaNumero(Regex("""\bC[O0]MPR[O0]BANTE\b"""), fuerte = true),
+        EtiquetaNumero(Regex("""\bF[O0]LI[O0]\b"""), fuerte = true),
+        EtiquetaNumero(Regex("""\bBOLETA\b"""), fuerte = false),
+        EtiquetaNumero(Regex("""\bFACTURA\b"""), fuerte = false),
+        // La N suelta: "N 1234", "N° 303.747", "Nro 36325".
         // Tiene que ser palabra completa, si no TRANSBANK y VENTA la disparan.
-        """\bN(?:RO|UM|º|°)?\b""",
-        """\bOPERACION\b""",
-        """\bCOMPROBANTE\b""",
-        """\bCOD\.?\s*AUT""",
-        """\bAUTORIZACION\b""",
-        """\bAPROBACION\b""",
-        """\bTRANSACCION\b""",
-        """\bTICKET\b""",
+        EtiquetaNumero(Regex("""\bN(?:RO|UM|º|°)?\b"""), fuerte = false),
+        EtiquetaNumero(Regex("""\bTICKET\b"""), fuerte = true),
+        EtiquetaNumero(Regex("""\bTRANSACCI[O0]N\b"""), fuerte = true),
+        EtiquetaNumero(Regex("""\bC[O0]D\.?\s*AUT"""), fuerte = false),
+        EtiquetaNumero(Regex("""\bAUT[O0]RIZACI[O0]N\b"""), fuerte = false),
+        EtiquetaNumero(Regex("""\bAPR[O0]BACI[O0]N\b"""), fuerte = false),
     )
+
+    /* El numero del documento NUNCA tiene menos de 3 digitos. Con uno o dos
+       es otra cosa: el "39" de "BOLETA ELECTRONICA 39" (codigo SII) o un
+       correlativo suelto, que es como una boleta GetNet quedo registrada
+       con el numero 1. */
+    private const val NUM_DOC = """(\d{1,3}(?:\.\d{3})+|\d{3,12})(?!\d)"""
+    // Etiqueta fuerte: el numero va pegado, con ":" o "N°" de por medio.
+    private val RE_NUM_PEGADO = Regex("""^[\s:.#°º=-]*(?:N(?:RO|UM)?\.?\s*[°º]?[\s:.#=-]*)?$NUM_DOC""")
+    // Etiqueta debil: el numero puede venir unas palabras despues.
+    private val RE_NUM_CERCA = Regex("""^[^0-9]{0,20}?$NUM_DOC""")
+    private val RE_NUM_SUELTO = Regex("""(?<![\d.])$NUM_DOC""")
+    private val RE_MONTO_CON_SIGNO = Regex("""\$\s*[\d.,]+""")
+    private val RE_O_EN_NUMERO = Regex("""(?<=\d)O|O(?=\d)""")
+    private val RE_PALABRA = Regex("""[A-Z]{3,}""")
+    private val RE_DIGITO = Regex("""\d""")
+    private val RE_ESPACIOS = Regex("""[ \t]+""")
+
+    /* Lo que NO es el nombre del emisor aunque este arriba del papel: la marca
+       del POS, los rotulos del voucher y del SII, y los encabezados de datos. */
+    private val RE_NO_EMISOR = Regex(
+        """TRANSBANK|GETNET|REDELCOM|MERCADO ?PAGO|SUMUP|\bKLAP\b|\bVENTA\b|COPIA|CLIENTE|""" +
+            """COMERCIO|TARJETA|DEBITO|CREDITO|PREPAGO|AFECTA|VALIDO|\bBOLETA\b|FACTURA|""" +
+            """ELECTRONICA|\bS\.?I\.?I\b|\bR\.?U\.?T\b|\bGIRO\b|DIRECCION|FECHA|COMUNA|CIUDAD|""" +
+            """FONO|TELEFONO|EMAIL|SUCURSAL|MATRIZ|\bCALLE\b|AVENIDA|\bAV\b|PASAJE|\bPJE\b|""" +
+            """\bVISA\b|MASTERCARD|REDCOMPRA|TOTAL|MONTO|\bIVA\b|NETO|OPERACION|AUTORIZACION|""" +
+            """COMPROBANTE|APROBACION|DOCUMENTO|TRIBUTARIO|SENOR|RAZON SOCIAL|CONDICION|""" +
+            """VENCIMIENTO|\bPAGO\b""")
 
     private fun sinTildes(s: String): String = s
         .replace('Á', 'A').replace('É', 'E').replace('Í', 'I')
@@ -374,21 +417,91 @@ object LectorBoleta {
 
     // ================================================================ numero
 
-    private fun buscarNumero(L: List<String>): String? {
-        val candidatos = mutableListOf<String>()
-        for (et in ETIQUETAS) {
-            val re = Regex(et + """[^0-9]{0,20}?""" + NUMERO)
-            for (l in L) {
-                if (RE_RUT_EN_LINEA.containsMatchIn(l)) continue  // el RUT no es folio
-                if (RE_PLATA.containsMatchIn(l)) continue         // ni una linea de plata
-                re.find(l)?.let { candidatos.add(it.groupValues[1].replace(".", "")) }
+    /**
+     * Borra lo que parece numero de documento y no lo es: RUT, fechas, horas,
+     * montos con $ y los 4 digitos de la tarjeta. Arregla el cero leido como O.
+     */
+    private fun limpiarParaNumero(s: String): String {
+        var r = RE_O_EN_NUMERO.replace(s, "0")
+        for (re in listOf(RE_RUT_EN_LINEA, RE_FECHA, RE_FECHA_ISO, RE_HORA,
+                RE_MONTO_CON_SIGNO, RE_TARJETA_LIMPIAR)) {
+            r = re.replace(r, " ")
+        }
+        return r
+    }
+
+    /** El numero que sigue a la etiqueta en su misma linea. */
+    private fun numeroTras(linea: String, etiqueta: MatchResult, fuerte: Boolean): String? {
+        val resto = limpiarParaNumero(linea.substring(etiqueta.range.last + 1))
+        val re = if (fuerte) RE_NUM_PEGADO else RE_NUM_CERCA
+        return re.find(resto)?.groupValues?.get(1)?.replace(".", "")
+    }
+
+    /**
+     * El numero de una etiqueta fuerte que quedo en la fila de abajo (o de
+     * arriba). Si la fila de la etiqueta trae dos etiquetas, como
+     * "Aprobacion:  Comprobante:", y la fila vecina dos numeros, a cada una le
+     * toca el suyo por orden: al COMPROBANTE el segundo, no el primero.
+     */
+    private fun numeroVecino(lineas: List<String>, k: Int, linea: String, etiqueta: MatchResult): String? {
+        val orden = ETIQUETAS
+            .flatMap { e -> e.re.findAll(linea).map { it.range.first }.toList() }
+            .distinct()
+            .count { it < etiqueta.range.first }
+        for (j in listOf(k + 1, k - 1)) {
+            val vecina = lineas.getOrNull(j) ?: continue
+            val limpia = limpiarParaNumero(vecina)
+            // Solo los numeros antes de la primera palabra: despues ya son de
+            // otra etiqueta ("011092  AUTORIZACION: 459719").
+            val hasta = RE_PALABRA.find(limpia)?.range?.first ?: limpia.length
+            val numeros = RE_NUM_SUELTO.findAll(limpia.substring(0, hasta))
+                .map { it.groupValues[1].replace(".", "") }
+                .toList()
+            if (numeros.isNotEmpty()) return numeros.getOrNull(orden) ?: numeros.first()
+        }
+        return null
+    }
+
+    private fun buscarNumero(fuentes: List<List<String>>): String? {
+        for (et in ETIQUETAS) for (lineas in fuentes) for ((k, l) in lineas.withIndex()) {
+            // Con una etiqueta debil, una linea de plata no trae el folio:
+            // "El IVA de la Boleta $429" no es la boleta 429.
+            if (!et.fuerte && RE_PLATA.containsMatchIn(l)) continue
+            for (m in et.re.findAll(l)) {
+                numeroTras(l, m, et.fuerte)?.let { return it }
+                if (et.fuerte) numeroVecino(lineas, k, l, m)?.let { return it }
             }
         }
-        /* Se prefiere el primer candidato de tres digitos o mas. El motivo es
-           "BOLETA ELECTRONICA 39": ese 39 es el codigo de documento del SII,
-           no el folio. Si ninguno llega a tres digitos se usa el primero
-           igual, porque hay boletas con folio de dos cifras. */
-        return candidatos.firstOrNull { it.length >= 3 } ?: candidatos.firstOrNull()
+        return null
+    }
+
+    // =============================================================== emisor
+
+    /**
+     * La empresa que emitio el papel: la primera linea de arriba que parece un
+     * nombre. Se saltan la marca del POS (TRANSBANK, GETNET), los rotulos
+     * (VENTA - COPIA CLIENTE, TARJETA DE DEBITO, BOLETA ELECTRONICA, S.I.I.)
+     * y todo lo que traiga numeros o dos puntos (RUT, folio, direccion, fecha).
+     *
+     * Transbank: "FARMACIA ITALIA SPA". GetNet: el nombre bajo el RUT.
+     * Boleta SII: el nombre bajo el folio. Factura: "ESTEL SPA".
+     */
+    private fun buscarEmisor(textos: List<String>): String? {
+        for (texto in textos) {
+            val crudas = texto.lineSequence()
+                .map { it.replace(RE_ESPACIOS, " ").trim() }
+                .filter { it.isNotEmpty() }
+                .toList()
+            val normales = normalizar(texto)
+            for (k in 0 until minOf(15, normales.size, crudas.size)) {
+                val l = normales[k]
+                if (':' in l || RE_DIGITO.containsMatchIn(l)) continue
+                if (l.count { it.isLetter() } < 4) continue
+                if (RE_NO_EMISOR.containsMatchIn(l)) continue
+                return crudas[k].take(80)
+            }
+        }
+        return null
     }
 
     // ========================================================= fecha y hora
@@ -505,7 +618,8 @@ object LectorBoleta {
         }
 
         // ------------------------------------------- numero de documento
-        val numero = buscarNumero(L) ?: buscarNumero(F)
+        val numero = buscarNumero(listOf(F, L))
+        val emisor = buscarEmisor(listOf(textoPorFilas, texto))
 
         // ------------------------------------------------------- fecha y hora
         val (fecha, hora) = buscarFechaHora(listOf(L, F))
@@ -528,6 +642,7 @@ object LectorBoleta {
             avisos = avisos,
             textoLeido = textoPorFilas,
             calculados = m.calculados,
+            emisor = emisor,
         )
     }
 }

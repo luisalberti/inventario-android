@@ -516,6 +516,7 @@ fun SaleScreen(
                     Resumen("Productos", "$unidades")
                     Resumen("Documento", tipoDoc?.replaceFirstChar { it.uppercase() } ?: "—")
                     Resumen("N°", numDoc.ifBlank { "—" })
+                    venta.lectura.value?.emisor?.let { Resumen("Emisor", it) }
                     Resumen("Pago", formaPago?.replaceFirstChar { it.uppercase() } ?: "—")
                     if (formaPago == "efectivo") {
                         val rec = Formato.montoValor(monto) ?: 0.0
@@ -656,6 +657,7 @@ private fun enviar(
                 // para saber despues si vale la pena confiar en el lector.
                 cobroOrigen = if (lectura != null) "ocr" else "manual",
                 cobroUltimos4 = lectura?.ultimos4,
+                boletaEmisor = lectura?.emisor,
                 rutEmpresa = if (tipoDoc == "factura") rut else null,
                 razonSocial = if (tipoDoc == "factura") razon else null,
                 direccionComercial = if (tipoDoc == "factura") direccion else null,
@@ -730,7 +732,12 @@ private fun OpcionGrande(
 private fun Resumen(etiqueta: String, valor: String, destacado: Boolean = false) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
         Text(etiqueta, color = TintaSuave)
+        Spacer(Modifier.width(12.dp))
+        // weight + alineado a la derecha: un nombre de empresa largo se
+        // parte en dos lineas en vez de empujar la etiqueta fuera.
         Text(valor,
+            modifier = Modifier.weight(1f),
+            textAlign = TextAlign.End,
             style = if (destacado) MaterialTheme.typography.titleMedium
                     else MaterialTheme.typography.bodyLarge)
     }

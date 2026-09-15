@@ -21,6 +21,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
@@ -240,6 +241,7 @@ fun OcrScreen(
                     }
                 }
 
+                L.emisor?.let { Fila("Emisor", it) }
                 Fila("Número", L.numero ?: "no se encontró", falta = L.numero == null)
                 Fila("Total", L.total?.let { Dinero.clp(it.toDouble()) } ?: "no se encontró",
                     falta = L.total == null, calculado = "total" in L.calculados)
@@ -311,10 +313,14 @@ private fun Fila(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(etiqueta, color = TintaSuave)
-        Column(horizontalAlignment = Alignment.End) {
+        Spacer(Modifier.width(12.dp))
+        // weight: un nombre de empresa largo se parte en dos lineas en vez
+        // de empujar la etiqueta fuera de la pantalla.
+        Column(Modifier.weight(1f), horizontalAlignment = Alignment.End) {
             Text(
                 valor ?: "—",
                 fontWeight = FontWeight.SemiBold,
+                textAlign = TextAlign.End,
                 color = if (falta) MaterialTheme.colorScheme.error else Tinta,
             )
             if (calculado) {

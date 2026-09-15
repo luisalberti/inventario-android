@@ -74,6 +74,9 @@ data class VentaReq(
     // para revisar primero las ventas que dependieron de el.
     @Json(name = "cobro_origen") val cobroOrigen: String? = null,
     @Json(name = "cobro_ultimos4") val cobroUltimos4: String? = null,
+    // La empresa que emitio la boleta, leida de la foto. Un venta.php que
+    // todavia no conoce este campo simplemente lo ignora: no rompe la venta.
+    @Json(name = "boleta_emisor") val boletaEmisor: String? = null,
     @Json(name = "rut_empresa") val rutEmpresa: String? = null,
     @Json(name = "razon_social") val razonSocial: String? = null,
     @Json(name = "direccion_comercial") val direccionComercial: String? = null,
