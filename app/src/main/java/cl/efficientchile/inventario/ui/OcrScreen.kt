@@ -10,6 +10,7 @@ import androidx.camera.view.PreviewView
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -18,6 +19,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -26,12 +28,19 @@ import cl.efficientchile.inventario.data.Dinero
 import cl.efficientchile.inventario.util.Fotos
 import cl.efficientchile.inventario.util.LectorBoleta
 import com.google.mlkit.vision.common.InputImage
+// Con alias: sin el, este Text tapa al Text de Compose en todo el archivo.
+import com.google.mlkit.vision.text.Text as TextoOcr
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import kotlin.math.abs
+import kotlin.math.atan2
+import kotlin.math.cos
+import kotlin.math.hypot
+import kotlin.math.sin
 
 /**
  * Fotografiar la boleta y precargar lo que dice.
@@ -60,6 +69,7 @@ fun OcrScreen(
     var error by remember { mutableStateOf<String?>(null) }
     var lectura by remember { mutableStateOf<LectorBoleta.Lectura?>(null) }
     var archivo by remember { mutableStateOf<File?>(null) }
+    var verTexto by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -135,7 +145,7 @@ fun OcrScreen(
                                     override fun onImageSaved(o: ImageCapture.OutputFileResults) {
                                         scope.launch {
                                             try {
-                                                val (chico, texto) = withContext(Dispatchers.IO) {
+                                                val (chico, leido) = withContext(Dispatchers.IO) {
                                                     val c = File(
                                                         ctx.cacheDir,
                                                         "comp_${System.currentTimeMillis()}.jpg")
@@ -144,7 +154,10 @@ fun OcrScreen(
                                                     c to reconocer(c)
                                                 }
                                                 archivo = chico
-                                                lectura = LectorBoleta.leer(texto)
+                                                lectura = LectorBoleta.leer(
+                                                    texto = leido.bloques,
+                                                    textoPorFilas = leido.filas,
+                                                )
                                             } catch (e: Exception) {
                                                 error = e.message ?: "No se pudo leer la foto"
                                             } finally {
@@ -180,7 +193,7 @@ fun OcrScreen(
                    una propiedad, y eso revienta el build sin avisar antes. */
                 val totalLeido = L.total
                 val descuadre = totalLeido != null &&
-                    kotlin.math.abs(totalLeido - totalEsperado) > 2
+                    abs(totalLeido - totalEsperado) > 2
 
                 if (descuadre && totalLeido != null) {
                     Surface(
@@ -227,9 +240,38 @@ fun OcrScreen(
                     modifier = Modifier.fillMaxWidth().height(56.dp),
                 ) { Text("Usar estos datos", style = MaterialTheme.typography.labelLarge) }
                 OutlinedButton(
-                    onClick = { lectura = null; archivo?.delete(); archivo = null },
+                    onClick = {
+                        lectura = null; archivo?.delete(); archivo = null; verTexto = false
+                    },
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text("Repetir la foto") }
+
+                /* Diagnostico. Cuando un monto no sale, lo primero es ver que
+                   leyo el telefono: si el numero no esta en este texto, el
+                   problema es la foto; si esta, es el lector. Se puede
+                   seleccionar y copiar para mandarlo. */
+                TextButton(
+                    onClick = { verTexto = !verTexto },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(if (verTexto) "Ocultar el texto leído" else "Ver el texto que leyó el teléfono")
+                }
+                if (verTexto) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        shape = MaterialTheme.shapes.small,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        SelectionContainer {
+                            Text(
+                                L.textoLeido.ifBlank { "(no se leyó texto)" },
+                                fontFamily = FontFamily.Monospace,
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.padding(12.dp),
+                            )
+                        }
+                    }
+                }
             }
         }
     }
@@ -251,14 +293,92 @@ private fun Fila(etiqueta: String, valor: String?, falta: Boolean) {
     }
 }
 
+/** El texto de la foto de dos formas: como lo agrupa el OCR y por filas. */
+private class TextoLeido(val bloques: String, val filas: String)
+
 /** Texto crudo de la foto. Corre en el telefono, sin red y sin costo por uso. */
-private suspend fun reconocer(foto: File): String {
+private suspend fun reconocer(foto: File): TextoLeido {
     val bmp = BitmapFactory.decodeFile(foto.absolutePath)
         ?: throw IllegalStateException("No se pudo abrir la foto")
     val lector = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
     return kotlinx.coroutines.suspendCancellableCoroutine { cont ->
         lector.process(InputImage.fromBitmap(bmp, 0))
-            .addOnSuccessListener { cont.resumeWith(Result.success(it.text)) }
+            .addOnSuccessListener {
+                cont.resumeWith(Result.success(TextoLeido(it.text, enFilas(it))))
+            }
             .addOnFailureListener { cont.resumeWith(Result.failure(it)) }
+    }
+}
+
+/** Una linea del OCR con su posicion ya enderezada. */
+private class Trozo(val texto: String, val x: Double, val y: Double, val alto: Double)
+
+/**
+ * Reordena el texto por filas segun donde esta cada linea en la foto.
+ *
+ * El OCR agrupa por bloques: si NETO / IVA / TOTAL estan en una columna y los
+ * montos en otra, entrega "NETO IVA TOTAL" juntos y los tres montos despues,
+ * y ninguna linea trae etiqueta y monto a la vez. Aca se vuelven a armar las
+ * filas como se ven en el papel: "NETO   $10.404".
+ *
+ * Dos cosas para que funcione con fotos reales:
+ * - La foto sale algo torcida. Se mide la inclinacion tipica de las lineas y
+ *   se endereza antes de comparar alturas.
+ * - El monto casi nunca queda exactamente a la altura de su etiqueta. Dos
+ *   lineas van en la misma fila si sus centros estan a menos de 60% del alto
+ *   de una linea. Lo que aun asi quede corrido una fila, lo resuelve
+ *   LectorBoleta mirando la fila de arriba y la de abajo y comprobando la
+ *   cuenta neto + IVA = total.
+ */
+private fun enFilas(res: TextoOcr): String {
+    val lineas = res.textBlocks.flatMap { it.lines }
+    if (lineas.isEmpty()) return res.text
+
+    // Inclinacion tipica: la mediana del angulo de las lineas largas.
+    val angulos = lineas.mapNotNull { l ->
+        val p = l.cornerPoints
+        if (p == null || p.size < 4) return@mapNotNull null
+        val dx = (p[1].x - p[0].x).toDouble()
+        val dy = (p[1].y - p[0].y).toDouble()
+        if (hypot(dx, dy) < 40.0) null else atan2(dy, dx)
+    }.sorted()
+    val angulo = if (angulos.isEmpty()) 0.0 else angulos[angulos.size / 2]
+    val c = cos(-angulo)
+    val s = sin(-angulo)
+
+    val trozos = lineas.mapNotNull { l ->
+        val p = l.cornerPoints
+        if (p != null && p.size >= 4) {
+            val cx = (p[0].x + p[1].x + p[2].x + p[3].x) / 4.0
+            val cy = (p[0].y + p[1].y + p[2].y + p[3].y) / 4.0
+            val izqX = (p[0].x + p[3].x) / 2.0
+            val izqY = (p[0].y + p[3].y) / 2.0
+            val alto = hypot((p[3].x - p[0].x).toDouble(), (p[3].y - p[0].y).toDouble())
+            Trozo(l.text, izqX * c - izqY * s, cx * s + cy * c, alto)
+        } else {
+            val b = l.boundingBox ?: return@mapNotNull null
+            Trozo(l.text, b.left.toDouble(), b.exactCenterY().toDouble(), b.height().toDouble())
+        }
+    }.sortedBy { it.y }
+
+    val filas = mutableListOf<MutableList<Trozo>>()
+    var yFila = 0.0
+    var altoFila = 0.0
+    for (t in trozos) {
+        val actual = filas.lastOrNull()
+        val margen = 0.6 * maxOf(t.alto, altoFila)
+        if (actual != null && abs(t.y - yFila) <= margen) {
+            actual += t
+            yFila = actual.sumOf { it.y } / actual.size
+            altoFila = actual.sumOf { it.alto } / actual.size
+        } else {
+            filas.add(mutableListOf(t))
+            yFila = t.y
+            altoFila = t.alto
+        }
+    }
+
+    return filas.joinToString("\n") { fila ->
+        fila.sortedBy { it.x }.joinToString("   ") { it.texto }
     }
 }
